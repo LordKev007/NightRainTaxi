@@ -1078,7 +1078,7 @@ let padEdge={};
 function readInput(){
   const k=keys,inv=SET.invert?-1:1;
   let steer=(k.KeyD||k.ArrowRight?1:0)-(k.KeyA||k.ArrowLeft?1:0), throttle=k.KeyW?1:0, brake=k.KeyS?1:0;
-  let climb=(k.Space||k.ArrowUp?1:0)-(k.KeyC||k.ArrowDown?1:0), strafe=(k.KeyE?1:0)-(k.KeyQ?1:0), boost=!!(k.ShiftLeft||k.ShiftRight), lx=0, ly=0;
+  let climb=(k.Space?1:0)-(k.KeyC?1:0)+((k.ArrowUp?1:0)-(k.ArrowDown?1:0))*inv, strafe=(k.KeyE?1:0)-(k.KeyQ?1:0), boost=!!(k.ShiftLeft||k.ShiftRight), lx=0, ly=0;
   padEdge={};
   const g=getPad();
   if(g){
@@ -1117,7 +1117,7 @@ const OPT=[
   {key:'blur',label:'Boost blur',choices:['Off','On']},
   {key:'shake',label:'Camera shake',choices:['Off','On']},
   {key:'rumble',label:'Controller rumble',choices:['Off','On']},
-  {key:'invert',label:'Climb',choices:['Push up to climb','Pull back to climb']},
+  {key:'invert',label:'Climb',choices:['Push up to climb','Pull back to climb'],hint:'For the left stick and the ↑ ↓ keys. Space always climbs and C always dives.'},
   {key:'quality',label:'Picture quality',choices:['Auto','High','Medium','Low'],hint:'Auto lowers the resolution by itself if the game runs slowly.'}];
 OPT.unshift({key:'damage',label:'Damage',choices:['Easy','Medium','Hard'],hint:'How much walls, traffic and Kuro cab rams hurt your cab in a Getaway shift. Easy is about half, Hard is about one and a half times.'},
   {key:'clocks',label:'Clocks',choices:['Off','On'],hint:'Off takes the countdowns out: no fare timers in a shift, and no shift clock in a Getaway shift.'});
