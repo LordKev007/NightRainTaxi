@@ -59,6 +59,11 @@ canvas#gl{position:fixed;inset:0;width:100%;height:100%;display:block}
 #hpBar .lag{background:#fff;opacity:.7}
 #hpBar .fill{background:var(--amber);box-shadow:0 0 10px var(--amber)}
 #hpBar.low .fill{background:var(--pink);box-shadow:0 0 10px var(--pink)}
+#bstBar{position:absolute;left:0;top:0;width:96px;margin:-6px 0 0 -48px;opacity:0;transition:opacity .4s}
+#bstBar .trk{height:5px;border-radius:3px;background:rgba(0,0,0,.6);box-shadow:0 0 0 1px rgba(255,255,255,.3);overflow:hidden}
+#bstBar .trk i{display:block;height:100%;background:#5ee7ff;box-shadow:0 0 10px #5ee7ff;border-radius:3px}
+#bstBar.low .trk i{background:var(--pink);box-shadow:0 0 10px var(--pink)}
+#bstBar span{display:block;text-align:center;font-size:11px;font-weight:700;margin-top:2px;color:#bff5ff;text-shadow:0 0 6px #000,0 0 2px #000}
 #hpBar span{display:block;text-align:center;font-size:12px;font-weight:700;margin-top:3px;text-shadow:0 0 6px #000,0 0 2px #000}
 #hull{font-size:20px;margin-top:4px;font-weight:700;color:var(--amber)}
 #hull.low{color:var(--pink);text-shadow:0 0 14px rgba(255,61,139,.8)}
@@ -179,6 +184,7 @@ table.hs tr.me .ini,table.hs tr.me .yen{color:var(--amber)}
   <div id="threats"><i></i><i></i><i></i><i></i></div>
   <div id="mark"><b></b><span></span></div>
   <div id="hpBar"><div class="trk"><i class="lag"></i><i class="fill"></i></div><span></span></div>
+  <div id="bstBar"><div class="trk"><i></i></div><span></span></div>
   <div id="board"><i></i></div>
   <div id="toast"></div>
   <div id="endBanner"><div id="endBig"></div><div id="endSub"></div></div>
@@ -206,7 +212,7 @@ table.hs tr.me .ini,table.hs tr.me .yen{color:var(--amber)}
 <script>
 "use strict";
 // The version shown in Options. The desktop app reads it from this line to decide whether an update is newer.
-const GAME_VERSION='10.8';
+const GAME_VERSION='10.10';
 // Present only inside the Windows / Steam Deck app (see desktop/preload.js): update, quit, fullscreen.
 const DESK=window.nrtDesktop||null;
 (function(){
@@ -1229,7 +1235,7 @@ function controlsHtml(){
 const MENU={
   main:()=>({items:[
     {label:'Rival Rush',hint:'75 seconds on the clock. Fast deliveries buy time, slow ones buy none. Four Kuro cabs hunt you, and green garages fix your cab, once each.',act:()=>startGame('getaway')},
-    {label:'Rival Rush: Extreme',hint:'60 seconds, smaller time bonuses, harsher damage, no repairs for deliveries, three garages, and a faster gang that comes all at once.',act:()=>startGame('getaway',{extreme:true})},
+    {label:'Rival Rush: Extreme',hint:'90 seconds, +5 s for every pickup, smaller delivery bonuses, harsher damage, no repairs for deliveries, three garages, and a faster gang that comes all at once.',act:()=>startGame('getaway',{extreme:true})},
     {label:'Meter Madness',hint:'Every passenger is on a clock. Miss three fares and the shift is over.',act:()=>startGame('shift')},
     {label:'Joy Ride',hint:'No clock and no gang. Take a fare if you feel like it.',act:()=>startGame('cruise')},
     {label:'High scores',hint:'The top ten for Rival Rush: Extreme, Rival Rush, Rival Rush with clocks off, and Meter Madness.',act:()=>{openMenu('scores');loadScores();}},
@@ -1374,7 +1380,7 @@ function startGame(m,opt){
   Object.assign(car,{x:0,y:70,z:48,vx:0,vy:0,vz:0,yaw:0,yr:0,roll:0,pitch:0});
   Object.assign(cam,{x:0,y:74.2,z:35.5,lookYaw:0,lookPitch:0});
   Object.assign(game,{total:0,rides:0,starsSum:0,hitCool:0,strikes:0,hinted:false,hull:100,wrecks:0,near:1e9,onTail:0,extreme:!!(opt&&opt.extreme),boost:100,boosting:false,boostTold:false,endReason:'',rideLeft:0,rideTotal:1});
-  game.shiftTime=game.extreme?60:75;
+  game.shiftTime=game.extreme?90:75;
   resetChasers();sparks.length=0;trail.length=0;placeGarages(m==='getaway'?(game.extreme?3:5):0);$('fareClk').textContent='';
   $('hud').classList.add('on');$('totalYen').textContent='¥0';$('clock').textContent='';$('hull').textContent='';Object.assign(hp,{shown:100,lag:100,until:time+2.5,lt:time});
   newJob();showStrikes();toast(m==='shift'?'Follow the diamond. Every fare is on the clock.':m==='getaway'?(game.extreme?'Extreme. The whole gang is coming. Good luck.':'Work fast. The Kuro cabs know you are on their turf.'):'No clock. Take fares if you feel like it.',3.5);
@@ -1590,18 +1596,20 @@ function updateJob(dt){
       game.phase='ride';setLamp('賃走','Hired','hired');
       $('jobText').textContent='Take '+j.who+' to '+j.to.name;$('jobJp').textContent=j.to.jp+' まで';$('stars').textContent=starStr(5);$('mark').className='drop';
       game.fare=800;game.jobTime=(22+j.dist/13)*game.tight;game.rideTotal=game.rideLeft=(14+j.dist/28)*(game.extreme?.85:1);sfxChime([76,81]);rumble(.3,120);
-      toast(j.who+' is in. '+Math.round(j.dist)+' m to go.');
+      const pickT=game.extreme&&clk()?5:0;game.shiftTime+=pickT;
+      toast(j.who+' is in. '+Math.round(j.dist)+' m to go.'+(pickT?'  +'+pickT+' s':''));
     } else {
       const fare=800+j.dist*9,tip=game.rating*140,bonus=mode==='shift'&&SET.clocks?Math.floor(Math.max(0,game.jobTime))*25:0,total=fare+tip+bonus;
-      game.total+=total;game.rides++;game.starsSum+=game.rating;game.hull=Math.min(100,game.hull+(mode==='getaway'?(game.extreme?0:10):30));if(mode==='getaway')game.boost=Math.min(100,game.boost+(game.extreme?10:15));
+      game.total+=total;game.rides++;game.starsSum+=game.rating;game.hull=Math.min(100,game.hull+(mode==='getaway'?(game.extreme?0:10):30));
       // like Crazy Taxi: time is earned only by delivering quickly
       let rate='',addT=0;
       if(mode==='getaway'&&clk()){const f=game.rideLeft/game.rideTotal;rate=f>=.45?'Speedy':f>=.15?'Normal':'Slow';
-        addT=Math.round((rate==='Speedy'?6+j.dist/110:rate==='Normal'?3+j.dist/250:0)*(game.extreme?.6:1));game.shiftTime+=addT;}
+        addT=Math.round((rate==='Speedy'?6+j.dist/110:rate==='Normal'?3+j.dist/250:0)*(game.extreme?.8:1));game.shiftTime+=addT;}
+      let addB=0;if(mode==='getaway'){addB=(rate==='Speedy'?30:rate==='Slow'?10:20)-(game.extreme?5:0);addB=Math.round(Math.min(addB,100-game.boost));game.boost+=addB;}
       $('totalYen').textContent=yen(game.total);sfxChime([72,76,79,84]);rumble(.4,200);
       const stars=starStr(game.rating);
       newJob();
-      toast('+'+yen(total)+'  '+stars+(bonus?'  including '+yen(bonus)+' for speed':'')+(rate?'  '+rate+(addT?' +'+addT+' s':''):''),3.2);
+      toast('+'+yen(total)+'  '+stars+(bonus?'  including '+yen(bonus)+' for speed':'')+(rate?'  '+rate+(addT?' +'+addT+' s':''):'')+(addB?'  +'+addB+'% boost':''),3.2);
     }
   }
   if(mode==='shift'&&SET.clocks){game.jobTime-=dt;const c=$('clock');c.textContent=Math.max(0,Math.ceil(game.jobTime));c.className=game.jobTime<10?'low':'';
@@ -1974,10 +1982,19 @@ function drawHealth(){
   hb.querySelector('.fill').style.width=Math.max(0,game.hull)+'%';hb.querySelector('.lag').style.width=Math.max(0,hp.lag)+'%';
   hb.lastElementChild.textContent='Cab '+Math.max(0,Math.round(game.hull))+'%';
 }
+// boost rides under the health bar: shown while boosting, for a moment after it is refilled, and when it runs dry
+const bst={last:100,until:0};
 function drawBoost(){
-  const b=$('boost'),on=mode==='getaway';
-  if(b.classList.contains('on')!==on)b.classList.toggle('on',on);if(!on)return;
-  b.querySelector('i').style.width=game.boost.toFixed(1)+'%';b.classList.toggle('low',game.boost<20);
+  const b=$('bstBar');
+  if(mode!=='getaway'){b.style.opacity='0';return;}
+  if(game.boost>bst.last+.5){bst.until=time+2.5;}if(game.boosting||(game.boost<=0&&inp.boost))bst.until=Math.max(bst.until,time+1.2);bst.last=game.boost;
+  const x=car.x,y=car.y+2.2,z=car.z,cw=VP[3]*x+VP[7]*y+VP[11]*z+VP[15];
+  b.style.opacity=cw>0&&time<bst.until?'1':'0';if(cw<=0)return;
+  const sx=((VP[0]*x+VP[4]*y+VP[8]*z+VP[12])/cw*.5+.5)*innerWidth,sy=(.5-(VP[1]*x+VP[5]*y+VP[9]*z+VP[13])/cw*.5)*innerHeight;
+  b.style.transform='translate('+sx.toFixed(1)+'px,'+sy.toFixed(1)+'px)';
+  b.classList.toggle('low',game.boost<20);
+  b.querySelector('i').style.width=game.boost.toFixed(1)+'%';
+  b.lastElementChild.textContent=game.boost<=0?'Out of boost':'Boost '+Math.round(game.boost)+'%';
 }
 function updateHud(){
   drawBoost();
