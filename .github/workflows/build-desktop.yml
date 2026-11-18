@@ -1,0 +1,70 @@
+# Builds the Steam Deck (Linux AppImage) and Windows versions of Night Rain Taxi.
+# It runs whenever a release is published on GitHub, and attaches the two files to that release.
+# It can also be run by hand from the Actions tab; the files then appear under that run's "Artifacts".
+name: Build desktop versions
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Put the current game inside the app
+        run: |
+          mkdir -p game
+          cp ../index.html game/index.html
+
+      - name: Take the version number from the game file
+        run: |
+          V=$(grep -o "const GAME_VERSION='[0-9.]*'" game/index.html | grep -o "[0-9][0-9.]*")
+          if [[ "$V" =~ ^[0-9]+\.[0-9]+$ ]]; then V="$V.0"; fi
+          if [[ "$V" =~ ^[0-9]+$ ]]; then V="$V.0.0"; fi
+          echo "Game version $V"
+          npm pkg set version="$V"
+
+      - name: Install the build tools
+        run: npm install
+
+      - name: Build for Steam Deck
+        if: runner.os == 'Linux'
+        run: npx electron-builder --linux --publish never
+
+      - name: Build for Windows
+        if: runner.os == 'Windows'
+        run: npx electron-builder --win --publish never
+
+      - name: Attach the files to the release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          shopt -s nullglob
+          files=(dist/*.AppImage dist/*.exe)
+          gh release upload "${{ github.event.release.tag_name }}" "${files[@]}" --clobber --repo "${{ github.repository }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NightRainTaxi-${{ runner.os }}
+          path: |
+            desktop/dist/*.AppImage
+            desktop/dist/*.exe
