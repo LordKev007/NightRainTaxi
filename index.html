@@ -188,6 +188,10 @@ table.hs tr.me .ini,table.hs tr.me .yen{color:var(--amber)}
 
 <script>
 "use strict";
+// The version shown in Options. The desktop app reads it from this line to decide whether an update is newer.
+const GAME_VERSION='10.3';
+// Present only inside the Windows / Steam Deck app (see desktop/preload.js): update, quit, fullscreen.
+const DESK=window.nrtDesktop||null;
 (function(){
 const $=id=>document.getElementById(id);
 const canvas=$('gl');
@@ -1072,7 +1076,7 @@ function sfxThunder(dist){ if(!A.ctx)return; const c=A.ctx,t0=c.currentTime+.12+
 
 // ------------------------------------------------------------------ input
 const keys={}, padPrev=[]; let padSeen=false, lastDev='key', navCool=0;
-function toggleFullscreen(){try{document.fullscreenElement?document.exitFullscreen():document.documentElement.requestFullscreen().catch(()=>{});}catch(_){}}
+function toggleFullscreen(){if(DESK){DESK.toggleFullscreen();return;}try{document.fullscreenElement?document.exitFullscreen():document.documentElement.requestFullscreen().catch(()=>{});}catch(_){}}
 addEventListener('keydown',e=>{
   if(['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code))e.preventDefault();
   initAudio();
@@ -1091,7 +1095,7 @@ addEventListener('pointerdown',initAudio);
 // in fullscreen the mouse pointer hides after two seconds of stillness, and comes back as soon as the mouse moves
 let lastMouse=performance.now(),wasFs=false;
 addEventListener('mousemove',()=>{lastMouse=performance.now();document.body.classList.remove('nocursor');});
-setInterval(()=>{const fs=!!document.fullscreenElement;if(fs&&!wasFs)lastMouse=performance.now();wasFs=fs;
+setInterval(()=>{const fs=!!document.fullscreenElement||!!DESK;if(fs&&!wasFs)lastMouse=performance.now();wasFs=fs;
   document.body.classList.toggle('nocursor',fs&&performance.now()-lastMouse>2000);},250);
 function getPad(){let gp=null;try{const l=navigator.getGamepads?navigator.getGamepads():[];for(const g of l){if(g&&g.connected){if(g.mapping==='standard')return g;gp=gp||g;}}}catch(e){}return gp;}
 const dz=v=>{const a=Math.abs(v);return a<.16?0:Math.sign(v)*(a-.16)/.84;};
@@ -1175,8 +1179,10 @@ const MENU={
     {label:'Joy Ride',hint:'No clock and no gang. Take a fare if you feel like it.',act:()=>startGame('cruise')},
     {label:'High scores',hint:'The top ten for Rival Rush, Rival Rush with clocks off, and Meter Madness.',act:()=>{openMenu('scores');loadScores();}},
     {label:'Options',hint:'Damage, clocks, sound and picture.',act:()=>openMenu('options')},
-    {label:'Controls',hint:'Controller and keyboard.',act:()=>openMenu('controls')}]}),
-  options:()=>({head:'Options',items:[
+    {label:'Controls',hint:'Controller and keyboard.',act:()=>openMenu('controls')}]
+    .concat(DESK&&DS.latest?[{label:'Update to v'+DS.latest,hint:DS.msg||'A new version is out. It downloads in a moment and the game restarts.',act:deskUpdate}]:[])
+    .concat(DESK?[{label:'Quit',hint:'Close the game.',act:()=>DESK.quit()}]:[])}),
+  options:()=>({head:'Options',pane:'<p class="hsNote" style="margin:0 0 10px">'+versionText()+'</p>',items:[
     {label:'Gameplay',hint:'Damage level and clocks.',act:()=>openMenu('gameplay')},
     {label:'Sound',hint:'Music, rain and engine volumes.',act:()=>openMenu('sound')},
     {label:'Picture',hint:'Rain on the lens, boost blur, camera shake, picture quality, fullscreen.',act:()=>openMenu('picture')},
@@ -1316,6 +1322,25 @@ function finishShift(){$('endBanner').classList.remove('on');state='over';$('hud
 // Shared tables live on a small Cloudflare Worker at SCORE_URL. Until that is set, or whenever it cannot be
 // reached, scores are kept in this browser instead, so the game always works.
 const SCORE_URL='https://night-rain-taxi-scores.battlesim.workers.dev';
+// ------------------------------------------------------------------ version and desktop app
+const DS={info:null,latest:null,msg:'',busy:false};
+function versionText(){
+  let t='Night Rain Taxi version '+GAME_VERSION;
+  if(DESK&&DS.info)t+=', '+(DS.info.deck?'Steam Deck':DS.info.platform==='win32'?'Windows':'desktop')+' app '+DS.info.appVersion;
+  else if(!DESK)t+=', web';
+  return t+'.';
+}
+async function deskUpdate(){
+  if(DS.busy)return;DS.busy=true;DS.msg='Downloading v'+DS.latest+'…';renderMenu();
+  let r;try{r=await DESK.update();}catch(e){r={ok:false,error:String(e&&e.message||e)};}
+  DS.busy=false;
+  if(!r||!r.ok){DS.msg='The update did not download: '+((r&&r.error)||'unknown problem')+'. Try again later.';if(uiOpen())renderMenu();}
+  // on success the app reloads itself into the new version
+}
+if(DESK){
+  DESK.info().then(i=>{DS.info=i;}).catch(()=>{});
+  DESK.check().then(r=>{if(r&&r.newer){DS.latest=r.latest;if(uiOpen()&&topMenu()==='main')renderMenu();}}).catch(()=>{});
+}
 const TABLE_NAMES={hunted:'Rival Rush',huntedFree:'Rival Rush, clocks off',nightShift:'Meter Madness'};
 const TABLE_HINT={hunted:'Rival Rush with the clock on.',huntedFree:'Rival Rush with Clocks set to Off: it lasts until your cab is wrecked.',nightShift:'Meter Madness with the clock on.'};
 const blankTables=()=>({hunted:[],huntedFree:[],nightShift:[]});

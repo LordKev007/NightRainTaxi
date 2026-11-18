@@ -1,0 +1,44 @@
+{
+  "name": "night-rain-taxi",
+  "productName": "Night Rain Taxi",
+  "version": "10.3.0",
+  "description": "Fly a cab through a city where it never stops raining.",
+  "author": "LordKev007",
+  "homepage": "https://lordkev007.github.io/NightRainTaxi/",
+  "license": "UNLICENSED",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build:linux": "electron-builder --linux --publish never",
+    "build:win": "electron-builder --win --publish never"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "io.github.lordkev007.nightraintaxi",
+    "productName": "Night Rain Taxi",
+    "files": ["main.js", "preload.js", "game/**", "build/icon.png"],
+    "directories": { "output": "dist" },
+    "linux": {
+      "target": ["AppImage"],
+      "category": "Game",
+      "icon": "build/icon.png",
+      "artifactName": "NightRainTaxi-${version}.AppImage"
+    },
+    "win": {
+      "target": ["nsis"],
+      "icon": "build/icon.png",
+      "artifactName": "NightRainTaxi-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Night Rain Taxi"
+    }
+  }
+}
