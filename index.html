@@ -47,6 +47,9 @@ canvas#gl{position:fixed;inset:0;width:100%;height:100%;display:block}
 #boost.low .trk i{background:var(--pink);box-shadow:0 0 10px var(--pink)}
 #fps{position:fixed;right:14px;top:10px;font:600 13px/1 var(--ui);color:#c8ffd6;text-shadow:0 0 6px #000,0 0 2px #000;font-variant-numeric:tabular-nums;pointer-events:none;z-index:6}
 #fps:empty{display:none}
+#fps.g{color:#47e06a}
+#fps.y{color:#ffd23e}
+#fps.r{color:#ff4d6d}
 #speed{font-size:54px;font-weight:700;line-height:.9}
 #speed small,#alt small{font-size:14px;font-weight:400;opacity:.7;margin-left:4px}
 #alt{font-size:20px;margin-top:6px;color:var(--cyan)}
@@ -203,7 +206,7 @@ table.hs tr.me .ini,table.hs tr.me .yen{color:var(--amber)}
 <script>
 "use strict";
 // The version shown in Options. The desktop app reads it from this line to decide whether an update is newer.
-const GAME_VERSION='10.5';
+const GAME_VERSION='10.8';
 // Present only inside the Windows / Steam Deck app (see desktop/preload.js): update, quit, fullscreen.
 const DESK=window.nrtDesktop||null;
 (function(){
@@ -492,7 +495,7 @@ const GROUND_VS=VS_HEAD+`
 layout(location=0) in vec2 aQ; out vec3 vW;
 void main(){ vec3 w=vec3(uCam.x+aQ.x*5000.,0.,uCam.z+aQ.y*5000.); vW=w; gl_Position=uVP*vec4(w,1.); }`;
 const GROUND_FS=COMMON+`
-uniform sampler2D uRefl; uniform vec2 uRes;
+uniform sampler2D uRefl; uniform vec2 uRes; uniform vec4 uGar[5];
 in vec3 vW; out vec4 o;
 void main(){
   vec2 p=vW.xz; vec3 V=normalize(uCam-vW); float dist=length(uCam-vW);
@@ -521,6 +524,25 @@ void main(){
   float eX=smoothstep(.45,.1,abs(a.x-13.6)), eZ=smoothstep(.45,.1,abs(a.y-13.6));
   col+=(vec3(1.,.55,.10)*(dashX+dashZ)*1.3+vec3(.06,.6,.8)*max(eX*step(15.,a.y),eZ*step(15.,a.x))*.8)*fade;
   col+=ring*.03*near;
+  // garage pads: green-and-black hazard stripes painted on the street
+  float pulse=.75+.25*sin(uTime*4.);
+  for(int i=0;i<5;i++){
+    vec4 g=uGar[i]; if(g.z<.5)continue;
+    vec2 d=p-g.xy, ad=abs(d); float m=max(ad.x,ad.y); if(m>10.)continue;
+    vec3 grn=vec3(.04,1.,.22);
+    vec3 pad;
+    if(m>7.4){
+      float st=step(.5,fract((d.x+d.y)/4.));
+      pad=mix(vec3(0.),grn*1.05*pulse,st);
+    } else {
+      pad=col*.35+grn*.05;
+      if(min(ad.x,ad.y)<.7&&m<4.5)pad=grn*1.1*pulse;
+    }
+    float edge=max(smoothstep(.25,0.,abs(m-7.4)),smoothstep(.25,0.,abs(m-9.85)));
+    pad=mix(pad,grn*1.4,edge);
+    pad+=refl*fres*.12*step(.01,pad.g); // still wet: a little reflection on top of the paint
+    col=pad;
+  }
   o=vec4(applyFog(col,vW,1.),1.);
 }`;
 const BRIGHT_FS=`#version 300 es
@@ -636,7 +658,7 @@ function roundMesh(nu,nv,e1,e2){const v=[],ix=[],pw=(c,m)=>Math.sign(c)*Math.pow
   for(let j=0;j<nv;j++)for(let i=0;i<nu;i++){const a=j*(nu+1)+i,b=a+nu+1,c=a+1,d=b+1;ix.push(a,b,c,c,b,d);}
   const ib=gl.createBuffer();gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,ib);gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint16Array(ix),gl.STATIC_DRAW);
   return {vb:buffer(new Float32Array(v)),ib,count:ix.length};}
-const meshLo=roundMesh(12,7,.9,.82);
+const meshLo=roundMesh(12,7,.9,.82), meshMin=roundMesh(8,4,.9,.82);
 
 // ------------------------------------------------------------------ sign atlas
 const AT=2048, atlas=document.createElement('canvas'); atlas.width=atlas.height=AT;
@@ -899,7 +921,9 @@ const traffic=[], rinst=[];
 
 const instBuf=buffer(new Float32Array(inst)), instCount=inst.length/17;
 const cityVAO=vao([{buf:cubeBuf,stride:6,attrs:[[0,3],[1,3]]},{buf:instBuf,stride:17,div:1,attrs:[[2,3],[3,3],[4,4],[5,3],[6,4]]}]);
-const rCount=rinst.length/17, trafficVAO=vao([{buf:meshLo.vb,stride:6,attrs:[[0,3],[1,3]]},{buf:buffer(new Float32Array(rinst)),stride:17,div:1,attrs:[[2,3],[3,3],[4,4],[5,3],[6,4]]}],meshLo.ib);
+const rCount=rinst.length/17, rinstBuf=buffer(new Float32Array(rinst)),
+  trafficVAO=vao([{buf:meshLo.vb,stride:6,attrs:[[0,3],[1,3]]},{buf:rinstBuf,stride:17,div:1,attrs:[[2,3],[3,3],[4,4],[5,3],[6,4]]}],meshLo.ib),
+  trafficVAOLo=vao([{buf:meshMin.vb,stride:6,attrs:[[0,3],[1,3]]},{buf:rinstBuf,stride:17,div:1,attrs:[[2,3],[3,3],[4,4],[5,3],[6,4]]}],meshMin.ib);
 const signBuf=buffer(new Float32Array(signs)), signCount=signs.length/17;
 const signVAO=vao([{buf:quadBuf,stride:2,attrs:[[0,2]]},{buf:signBuf,stride:17,div:1,attrs:[[1,3],[2,3],[3,4],[4,4],[5,3]]}]);
 const signPos=[];for(let i=0;i<signs.length;i+=17)if(!signs[i+14])signPos.push(signs[i],signs[i+1],signs[i+2]);
@@ -928,7 +952,7 @@ const carVAO=vao([{buf:cubeBuf,stride:6,attrs:[[0,3],[1,3]]},{buf:buffer(new Flo
 const carCount=carInst.length/17;
 
 // ------------------------------------------------------------------ render targets
-let RW=0,RH=0,quality=1,T={};
+let RW=0,RH=0,quality=1,T={},reflMode=-1;
 function target(w,h,o){o=o||{};const t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,t);
   const fl=o.hdr&&hasFloat;
   gl.texStorage2D(gl.TEXTURE_2D,o.mips?Math.floor(Math.log2(Math.max(w,h)))+1:1,fl?gl.RGBA16F:gl.RGBA8,w,h);
@@ -942,10 +966,10 @@ function freeTarget(x){gl.deleteTexture(x.t);gl.deleteFramebuffer(x.f);if(x.rb)g
 function resize(){
   const dpr=Math.min(window.devicePixelRatio||1,1.5)*quality;
   const w=Math.max(2,Math.floor(canvas.clientWidth*dpr)),h=Math.max(2,Math.floor(canvas.clientHeight*dpr));
-  if(w===RW&&h===RH)return;RW=w;RH=h;canvas.width=w;canvas.height=h;
+  if(w===RW&&h===RH&&reflMode===G.refl)return;RW=w;RH=h;reflMode=G.refl;canvas.width=w;canvas.height=h;
   for(const k in T)freeTarget(T[k]);
   const h2=n=>Math.max(1,Math.floor(n));
-  T={scene:target(w,h,{hdr:1,depth:1}),refl:target(h2(w/2),h2(h/2),{depth:1,mips:1}),
+  T={scene:target(w,h,{hdr:1,depth:1}),refl:G.refl?target(h2(w/(G.refl>1?2:4)),h2(h/(G.refl>1?2:4)),{depth:1,mips:1}):target(4,4,{depth:1,mips:1}),
     a2:target(h2(w/2),h2(h/2),{hdr:1}),b2:target(h2(w/2),h2(h/2),{hdr:1}),a4:target(h2(w/4),h2(h/4),{hdr:1}),b4:target(h2(w/4),h2(h/4),{hdr:1}),
     a8:target(h2(w/8),h2(h/8),{hdr:1}),b8:target(h2(w/8),h2(h/8),{hdr:1})};
 }
@@ -1092,6 +1116,7 @@ function sfxThunder(dist){ if(!A.ctx)return; const c=A.ctx,t0=c.currentTime+.12+
 const keys={}, padPrev=[]; let padSeen=false, lastDev='key', navCool=0;
 function toggleFullscreen(){if(DESK){DESK.toggleFullscreen();return;}try{document.fullscreenElement?document.exitFullscreen():document.documentElement.requestFullscreen().catch(()=>{});}catch(_){}}
 addEventListener('keydown',e=>{
+  if(e.code==='F3'){e.preventDefault();if(!e.repeat){SET.fps=SET.fps?0:1;saveSet();fpsT=.5;if(uiOpen())renderMenu();}return;}
   if(['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code))e.preventDefault();
   initAudio();
   if(lastDev!=='key'){lastDev='key';drawKeys();}
@@ -1139,13 +1164,20 @@ function readInput(){
 function rumble(strong,ms){if(!SET.rumble)return;const g=getPad();try{if(g&&g.vibrationActuator)g.vibrationActuator.playEffect('dual-rumble',{duration:ms,strongMagnitude:strong,weakMagnitude:strong*.6}).catch(()=>{});}catch(e){}}
 
 // ------------------------------------------------------------------ settings and menus
-const SET={music:6,rain:8,sfx:7,lens:1,blur:1,shake:1,rumble:1,invert:0,quality:0,damage:1,clocks:1,fps:0};
+const SET={music:6,rain:8,sfx:7,lens:1,blur:1,shake:1,rumble:1,invert:0,quality:0,damage:1,clocks:1,fps:0,
+  c_res:2,c_refl:2,c_traffic:1,c_rainfx:2,c_steam:1,c_bloom:1};
+// Picture detail. High, Medium and Low are fixed sets; Custom uses the c_ values; Auto starts on High and steps down if it has to.
+const DKEYS=['res','refl','traffic','rainfx','steam','bloom'];
+const PRESETS=[{res:2,refl:2,traffic:1,rainfx:2,steam:1,bloom:1},{res:1,refl:1,traffic:0,rainfx:1,steam:1,bloom:1},{res:0,refl:0,traffic:0,rainfx:1,steam:0,bloom:0}];
+let G=Object.assign({},PRESETS[0]),autoLevel=0;
 const dmgMul=()=>game.extreme?1.85:[.45,1,1.6][SET.damage];
 const clk=()=>SET.clocks||game.extreme;   // Extreme is always on the clock
 try{const sv=JSON.parse(localStorage.getItem('nrt-settings')||'{}');for(const k in SET)if(typeof sv[k]==='number')SET[k]=sv[k];}catch(e){}
 function saveSet(){try{localStorage.setItem('nrt-settings',JSON.stringify(SET));}catch(e){}}
 function applySettings(){
-  if(SET.quality===0)autoQ=true;else{autoQ=false;quality=[1,1,.75,.55][SET.quality];}
+  autoQ=SET.quality===0;
+  if(SET.quality===4){for(const k of DKEYS)G[k]=SET['c_'+k];}else G=Object.assign({},PRESETS[autoQ?autoLevel:SET.quality-1]);
+  quality=[.55,.75,1][G.res];
   resize();
   if(A.ctx){const t=A.ctx.currentTime;A.master.gain.setTargetAtTime(A.muted?0:1,t,.05);A.musicVol.gain.setTargetAtTime(SET.music/6,t,.1);
     A.rainVol.gain.setTargetAtTime(SET.rain/8,t,.1);A.sfx.gain.setTargetAtTime(SET.sfx/7,t,.1);}
@@ -1159,13 +1191,19 @@ const OPT=[
   {key:'shake',label:'Camera shake',choices:['Off','On']},
   {key:'rumble',label:'Controller rumble',choices:['Off','On']},
   {key:'invert',label:'Climb',choices:['Push up to climb','Pull back to climb'],hint:'For the left stick and the ↑ ↓ keys. Space always climbs and C always dives.'},
-  {key:'fps',label:'FPS counter',choices:['Off','On'],hint:'Frames per second, shown small in the top right corner.'},
-  {key:'quality',label:'Picture quality',choices:['Auto','High','Medium','Low'],hint:'Auto lowers the resolution by itself if the game runs slowly.'}];
+  {key:'fps',label:'FPS counter',choices:['Off','On'],hint:'Frames per second in the top right corner, green at 55 and up, yellow from 30, red below. F3 also turns it on and off.'},
+  {key:'quality',label:'Picture quality',choices:['Auto','High','Medium','Low','Custom'],hint:'Auto starts on High and steps down to Medium, then Low, if the game runs slowly. Custom uses your own detail settings.'},
+  {key:'c_res',detail:1,label:'Resolution',choices:['55%','75%','100%'],hint:'How sharp the picture is. The biggest single saving on a slow machine.'},
+  {key:'c_refl',detail:1,label:'Street reflections',choices:['Off','Low','High'],hint:'The neon mirrored in the wet street. Low reflects the city and signs at lower detail; High adds the traffic too. Off saves the most.'},
+  {key:'c_traffic',detail:1,label:'Traffic detail',choices:['Low','High'],hint:'How smooth the rounded traffic cars are. Low is close to identical at speed and much lighter.'},
+  {key:'c_rainfx',detail:1,label:'Falling rain',choices:['Off','Light','Heavy'],hint:'Rain streaks in the air. Light drops the far layer. The rain sound stays either way.'},
+  {key:'c_steam',detail:1,label:'Steam',choices:['Off','On'],hint:'Steam rising from vents and street grates.'},
+  {key:'c_bloom',detail:1,label:'Neon glow',choices:['Off','On'],hint:'The soft glow around bright lights.'}];
 OPT.unshift({key:'damage',label:'Damage',choices:['Easy','Medium','Hard'],hint:'How much walls, traffic and Kuro cab rams hurt your cab in Rival Rush. Easy is about half, Hard is about one and a half times.'},
   {key:'clocks',label:'Clocks',choices:['Off','On'],hint:'Off takes the countdowns out: no fare timers in Meter Madness, and no clock in Rival Rush. Rival Rush has its own clocks-off high score table; Meter Madness with clocks off has none.'});
-const OPT_PAGE={gameplay:['damage','clocks'],sound:['music','rain','sfx'],picture:['lens','blur','shake','fps','quality'],controller:['rumble','invert']};
+const OPT_PAGE={gameplay:['damage','clocks'],sound:['music','rain','sfx'],picture:['quality','lens','blur','shake','fps'],detail:['c_res','c_refl','c_traffic','c_rainfx','c_steam','c_bloom'],controller:['rumble','invert']};
 const optPage=(name,head)=>()=>({head,items:OPT_PAGE[name].map(k=>OPT.find(o=>o.key===k)).map(o=>({opt:o,label:o.label,hint:o.hint||''}))
-  .concat(name==='picture'?[{label:'Fullscreen',hint:'Also the F key. Needs a key press or a click, so it may not answer to the controller.',act:toggleFullscreen}]:[],[{label:'Back',act:back}])});
+  .concat(name==='picture'?[{label:'Detail settings',hint:'Turn each effect on or off. Changing any of them switches Picture quality to Custom.',act:()=>openMenu('detail')},{label:'Fullscreen',hint:'Also the F key. Needs a key press or a click, so it may not answer to the controller.',act:toggleFullscreen}]:[],[{label:'Back',act:back}])});
 // Controller glyphs follow the pad that is plugged in. Buttons are named by position, as the browser reports them:
 // 0 bottom, 1 right, 2 left, 3 top. Xbox and Nintendo print different letters in those places.
 let padStyle='xbox';
@@ -1202,10 +1240,10 @@ const MENU={
   options:()=>({head:'Options',pane:'<p class="hsNote" style="margin:0 0 10px">'+versionText()+'</p>',items:[
     {label:'Gameplay',hint:'Damage level and clocks.',act:()=>openMenu('gameplay')},
     {label:'Sound',hint:'Music, rain and engine volumes.',act:()=>openMenu('sound')},
-    {label:'Picture',hint:'Rain on the lens, boost blur, camera shake, picture quality, fullscreen.',act:()=>openMenu('picture')},
+    {label:'Picture',hint:'Picture quality and detail, rain on the lens, boost blur, camera shake, FPS counter, fullscreen.',act:()=>openMenu('picture')},
     {label:'Controller',hint:'Rumble and which way is up.',act:()=>openMenu('controller')},
     {label:'Back',act:back}]}),
-  gameplay:optPage('gameplay','Gameplay'),sound:optPage('sound','Sound'),picture:optPage('picture','Picture'),controller:optPage('controller','Controller'),
+  gameplay:optPage('gameplay','Gameplay'),sound:optPage('sound','Sound'),picture:optPage('picture','Picture'),detail:optPage('detail','Detail settings'),controller:optPage('controller','Controller'),
   scores:()=>({head:'High scores',items:Object.keys(TABLE_NAMES).map(k=>({label:TABLE_NAMES[k],hint:TABLE_HINT[k],pane:()=>scoreTable(k,-1),act:()=>{}}))
     .concat([{label:'Back',act:back}])}),
   initials:()=>({head:game.endReason||'New high score',stats:[endWhy(),'New high score: <b>'+yen(HS.pending.score)+'</b> makes the '+TABLE_NAMES[HS.pending.table]+' top ten. Enter your initials.'],
@@ -1227,7 +1265,7 @@ function openRoot(name){menuStack=[name];selStack=[0];renderMenu();ui.classList.
 function openMenu(name){menuStack.push(name);selStack.push(0);renderMenu();}
 function closeMenus(){menuStack=[];ui.classList.remove('on');$('bars').classList.remove('on');}
 function back(){if(topMenu()==='initials'){if(HS.slot>0){HS.slot--;renderMenu();sfxTick();}return;}if(menuStack.length>1){menuStack.pop();selStack.pop();renderMenu();sfxTick();}else if(state==='paused')togglePause();}
-function valHtml(o){const v=SET[o.key];return o.max?'<span class="bar"><i style="width:'+(v/o.max*100)+'%"></i></span>'+v:(o.choices[v]||'');}
+function valHtml(o){const v=o.detail?G[o.key.slice(2)]:SET[o.key];return o.max?'<span class="bar"><i style="width:'+(v/o.max*100)+'%"></i></span>'+v:(o.choices[v]||'');}
 function renderMenu(){
   const name=menuStack[menuStack.length-1],m=MENU[name]();items=m.items;
   ui.dataset.menu=name;ui.classList.toggle('dense',items.length>7);$('uiHead').textContent=m.head||'';$('uiStats').innerHTML=(m.stats||[]).map(x=>'<p>'+x+'</p>').join('');$('uiPane').innerHTML=m.pane||'';
@@ -1242,6 +1280,7 @@ function setSel(i){sel=i;selStack[selStack.length-1]=i;const ch=$('uiList').chil
 const topMenu=()=>menuStack[menuStack.length-1];
 function move(d){if(topMenu()==='initials'){HS.letters[HS.slot]=(HS.letters[HS.slot]-d+26)%26;renderMenu();sfxTick();return;}if(!items.length)return;setSel((sel+d+items.length)%items.length);sfxTick();}
 function adjust(d){if(topMenu()==='initials'){HS.slot=clamp(HS.slot+d,0,2);renderMenu();sfxTick();return;}const it=items[sel];if(!it||!it.opt)return;const o=it.opt,n=o.max?o.max+1:o.choices.length;
+  if(o.detail&&SET.quality!==4){for(const k of DKEYS)SET['c_'+k]=G[k];SET.quality=4;}
   SET[o.key]=o.max?clamp(SET[o.key]+d,0,o.max):(SET[o.key]+d+n)%n;saveSet();applySettings();
   $('uiList').children[sel].querySelector('.val').innerHTML=valHtml(o);sfxTick();}
 function activate(){if(menuLock>0)return;if(topMenu()==='initials'){if(HS.slot<2){HS.slot++;renderMenu();sfxTick();}else{sfxTick(1);submitScore();}return;}const it=items[sel];if(!it)return;
@@ -1310,7 +1349,7 @@ function missFare(){
 }
 const pick2=a=>a[Math.floor(Math.random()*a.length)];
 // ------------------------------------------------------------------ garages: one-time repair pads on the street
-const garages=[];
+const garages=[],GAR_U=new Float32Array(20);
 function placeGarages(n){
   garages.length=0;
   for(let tries=0;garages.length<n&&tries<600;tries++){
@@ -1824,7 +1863,7 @@ function fillDynamic(){
   // garages: a green square on the street with lights chasing round it, and a cross in the middle
   if(mode==='getaway')for(const g of garages){if(g.used)continue;
     for(let k=0;k<32;k++){const t=k/32*4,sd=Math.floor(t),f=t-sd,a=-9+18*f,px=[a,9,-a,-9][sd],pz=[-9,a,9,-a][sd];put(g.x+px,.7,g.z+pz,[.15,1.2,.45],1.3,.02+k/32*.96);}
-    for(let k=-3;k<=3;k++){put(g.x+k*1.4,.6,g.z,[.2,1.4,.55],1.5,0);if(k)put(g.x,.6,g.z+k*1.4,[.2,1.4,.55],1.5,0);}}
+    }
   let bn=0;
   if(game.job&&(state==='play'||state==='paused')){
     const p=game.phase==='pickup'?game.job.from:game.job.to,c=game.phase==='pickup'?[.1,.85,1]:[1,.15,.5];
@@ -1852,11 +1891,13 @@ function renderScene(mirror,nDyn,model,H,nCh){
   gl.bindVertexArray(emptyVAO);gl.drawArrays(gl.TRIANGLES,0,3);
   gl.enable(gl.DEPTH_TEST);gl.depthMask(true);gl.disable(gl.CULL_FACE);
   if(mirror>0){u=common(P.ground,1);gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,T.refl.t);gl.uniform1i(u.uRefl,0);gl.uniform2f(u.uRes,RW,RH);
+    for(let i=0;i<5;i++){const g=garages[i],on=mode==='getaway'&&g&&!g.used;GAR_U[i*4]=g?g.x:0;GAR_U[i*4+1]=g?g.z:0;GAR_U[i*4+2]=on?1:0;}
+    if(u['uGar[0]'])gl.uniform4fv(u['uGar[0]'],GAR_U);
     gl.bindVertexArray(groundVAO);gl.drawArrays(gl.TRIANGLE_STRIP,0,4);}
   gl.enable(gl.CULL_FACE);gl.frontFace(mirror>0?gl.CCW:gl.CW);
   u=common(P.box,mirror);gl.uniformMatrix4fv(u.uModel,false,IDENT);
   gl.bindVertexArray(cityVAO);gl.drawArraysInstanced(gl.TRIANGLES,0,36,instCount);
-  gl.bindVertexArray(trafficVAO);gl.drawElementsInstanced(gl.TRIANGLES,meshLo.count,gl.UNSIGNED_SHORT,0,rCount);
+  if(mirror>0||G.refl>1){const m=G.traffic?meshLo:meshMin;gl.bindVertexArray(G.traffic?trafficVAO:trafficVAOLo);gl.drawElementsInstanced(gl.TRIANGLES,m.count,gl.UNSIGNED_SHORT,0,rCount);}
   if(nCh){gl.bindVertexArray(chVAO);gl.drawArraysInstanced(gl.TRIANGLES,0,36,nCh);}
   gl.uniformMatrix4fv(u.uModel,false,model);gl.bindVertexArray(carVAO);gl.drawArraysInstanced(gl.TRIANGLES,0,36,carCount);
   gl.disable(gl.CULL_FACE);
@@ -1865,15 +1906,15 @@ function renderScene(mirror,nDyn,model,H,nCh){
   gl.enable(gl.BLEND);gl.blendFunc(gl.ONE,gl.ONE);gl.depthMask(false);
   common(P.beam,mirror);gl.bindVertexArray(beamVAO);gl.drawArraysInstanced(gl.TRIANGLE_STRIP,0,4,beamData.length/11);
   u=common(P.edge,mirror);gl.uniform1f(u.uEdge,PLAY+40);gl.uniform1f(u.uTop,CEIL+60);gl.bindVertexArray(emptyVAO);gl.drawArraysInstanced(gl.TRIANGLE_STRIP,0,4,4);
-  if(mirror>0){common(P.steam,1);gl.bindVertexArray(steamVAO);gl.drawArraysInstanced(gl.TRIANGLE_STRIP,0,4,steamCount);}
+  if(mirror>0&&G.steam){common(P.steam,1);gl.bindVertexArray(steamVAO);gl.drawArraysInstanced(gl.TRIANGLE_STRIP,0,4,steamCount);}
   u=common(P.pt,mirror);gl.uniform1f(u.uPx,H/(2*tanY));
   gl.bindVertexArray(ptVAO);gl.drawArrays(gl.POINTS,0,ptCount);
   gl.bindVertexArray(dynPtVAO);gl.drawArrays(gl.POINTS,0,nDyn);
-  if(mirror>0&&env.rainAmt>.02){u=common(P.rain,1);
+  if(mirror>0&&G.rainfx&&env.rainAmt>.02){u=common(P.rain,1);
     const sx=(wind.x-car.vx)*.028,sy=(-46-car.vy)*.028,sz=(wind.z-car.vz)*.028;
     gl.uniform2f(u.uWind,wind.dx,wind.dz);gl.bindVertexArray(rainVAO);
     gl.uniform3f(u.uBox,110,80,110);gl.uniform3f(u.uStreak,sx,sy,sz);gl.uniform4f(u.uRP,46,env.rainAmt,52,0);gl.drawArrays(gl.LINES,0,RAIN_N*2);
-    gl.uniform3f(u.uBox,340,230,340);gl.uniform3f(u.uStreak,sx*2.4,sy*2.4,sz*2.4);gl.uniform4f(u.uRP,46,env.rainAmt*.6,165,40);gl.drawArrays(gl.LINES,0,RAIN_N*2);}
+    gl.uniform3f(u.uBox,340,230,340);gl.uniform3f(u.uStreak,sx*2.4,sy*2.4,sz*2.4);gl.uniform4f(u.uRP,46,env.rainAmt*.6,165,40);if(G.rainfx>1)gl.drawArrays(gl.LINES,0,RAIN_N*2);}
   gl.depthMask(true);gl.disable(gl.BLEND);gl.frontFace(gl.CCW);
 }
 function fsPass(pr,dst,setup){gl.bindFramebuffer(gl.FRAMEBUFFER,dst?dst.f:null);gl.viewport(0,0,dst?dst.w:RW,dst?dst.h:RH);gl.useProgram(pr.p);setup(pr.u);gl.bindVertexArray(emptyVAO);gl.drawArrays(gl.TRIANGLES,0,3);}
@@ -1994,7 +2035,7 @@ let fpsT=0,fpsF=0,last=performance.now(),fpsAcc=0,fpsN=0,autoQ=true,warm=0;
 function frame(now){
   requestAnimationFrame(frame);
   const rawDt=Math.min(1,(now-last)/1000);let dt=Math.min(.05,rawDt);last=now;
-  fpsT+=rawDt;fpsF++;if(fpsT>=.5){const el=$('fps'),t=SET.fps?Math.round(fpsF/fpsT)+' FPS':'';if(el.textContent!==t)el.textContent=t;fpsT=0;fpsF=0;}
+  fpsT+=rawDt;fpsF++;if(fpsT>=.5){const el=$('fps'),f=fpsF/fpsT,t=SET.fps?Math.round(f)+' FPS  '+(1000/f).toFixed(1)+' ms':'',cl=f>=55?'g':f>=30?'y':'r';if(el.textContent!==t)el.textContent=t;if(el.className!==cl)el.className=cl;fpsT=0;fpsF=0;}
   resize();
   readInput();
   if(menuLock>0)menuLock-=rawDt;
@@ -2016,15 +2057,17 @@ function frame(now){
 
   const model=carModel(),nDyn=fillDynamic(),nCh=fillChasers();
   gl.bindFramebuffer(gl.FRAMEBUFFER,T.refl.f);gl.viewport(0,0,T.refl.w,T.refl.h);gl.clearColor(0,0,0,1);gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
-  renderScene(-1,nDyn,model,T.refl.h,nCh);
+  if(G.refl)renderScene(-1,nDyn,model,T.refl.h,nCh);
   gl.bindTexture(gl.TEXTURE_2D,T.refl.t);gl.generateMipmap(gl.TEXTURE_2D);
   gl.bindFramebuffer(gl.FRAMEBUFFER,T.scene.f);gl.viewport(0,0,RW,RH);gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
   renderScene(1,nDyn,model,RH,nCh);
   gl.disable(gl.DEPTH_TEST);gl.disable(gl.BLEND);
-  fsPass(P.bright,T.a2,u=>bindTex(0,T.scene.t,u.uT));
-  blur(T.a2,T.b2,1,0);blur(T.b2,T.a2,0,1);
-  blur(T.a2,T.b4,1,0);blur(T.b4,T.a4,0,1);
-  blur(T.a4,T.b8,2.6,0);blur(T.b8,T.a8,0,1);
+  if(G.bloom){
+    fsPass(P.bright,T.a2,u=>bindTex(0,T.scene.t,u.uT));
+    blur(T.a2,T.b2,1,0);blur(T.b2,T.a2,0,1);
+    blur(T.a2,T.b4,1,0);blur(T.b4,T.a4,0,1);
+    blur(T.a4,T.b8,2.6,0);blur(T.b8,T.a8,0,1);
+  } else for(const t of [T.a2,T.a4,T.a8]){gl.bindFramebuffer(gl.FRAMEBUFFER,t.f);gl.clearColor(0,0,0,1);gl.clear(gl.COLOR_BUFFER_BIT);}
   fsPass(P.post,null,u=>{bindTex(0,T.scene.t,u.uScene);bindTex(1,T.a2.t,u.uB2);bindTex(2,T.a4.t,u.uB4);bindTex(3,T.a8.t,u.uB8);
     gl.uniform1f(u.uTime,time);gl.uniform1f(u.uHit,hitFx);gl.uniform1f(u.uSpeed,car.speed);
     gl.uniform1f(u.uLens,[0,.42,1][SET.lens]*(1-env.cover*.85));gl.uniform1f(u.uRush,env.rush*SET.blur);gl.uniform1f(u.uAsp,RW/RH);gl.uniform1f(u.uMist,.7+.4*env.gust);
@@ -2032,7 +2075,7 @@ function frame(now){
 
   // on Auto, step the render scale down once or twice if the machine is struggling
   if(autoQ&&state==='play'){warm+=dt;if(warm>3){fpsAcc+=dt;fpsN++;if(fpsN>=90){const avg=fpsAcc/fpsN;fpsAcc=0;fpsN=0;
-    if(avg>.027&&quality>.56){quality=quality>.9?.75:.55;resize();}}}}
+    if(avg>.027&&autoLevel<2){autoLevel++;applySettings();toast('Picture quality lowered to keep it smooth  画質調整');}}}}
 }
 addEventListener('resize',resize);
 canvas.addEventListener('webglcontextlost',e=>{e.preventDefault();const f=$('fatal');f.style.display='flex';f.textContent='The graphics context was lost. Reload the page to keep driving.';});
