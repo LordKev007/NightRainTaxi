@@ -212,7 +212,7 @@ table.hs tr.me .ini,table.hs tr.me .yen{color:var(--amber)}
 <script>
 "use strict";
 // The version shown in Options. The desktop app reads it from this line to decide whether an update is newer.
-const GAME_VERSION='10.10';
+const GAME_VERSION='10.12';
 // Present only inside the Windows / Steam Deck app (see desktop/preload.js): update, quit, fullscreen.
 const DESK=window.nrtDesktop||null;
 (function(){
@@ -497,11 +497,24 @@ void main(){
   }
   o=vec4(c,1.);
 }`;
+const PAD_VS=VS_HEAD+`
+layout(location=0) in vec2 aQ; layout(location=1) in vec4 aP; out vec2 vD; out vec3 vW; out float vL;
+void main(){ vD=aQ*10.; vec3 w=vec3(aP.x+vD.x,aP.y+.06,aP.z+vD.y); vW=w; vL=aP.w; gl_Position=uVP*vec4(w,1.); }`;
+const PAD_FS=COMMON+`
+in vec2 vD; in vec3 vW; in float vL; out vec4 o;
+void main(){
+  vec2 ad=abs(vD); float m=max(ad.x,ad.y), pulse=.75+.25*sin(uTime*4.); vec3 grn=vec3(.04,1.,.22), c;
+  if(m>7.4) c=mix(vec3(0.),grn*1.05*pulse*vL,step(.5,fract((vD.x+vD.y)/4.)));
+  else { c=vec3(.004,.02,.008); if(min(ad.x,ad.y)<.7&&m<4.5)c=grn*1.1*pulse*vL; }
+  float edge=max(smoothstep(.25,0.,abs(m-7.4)),smoothstep(.25,0.,abs(m-9.85)));
+  c=mix(c,grn*1.4*vL,edge);
+  o=vec4(applyFog(c,vW,1.),1.);
+}`;
 const GROUND_VS=VS_HEAD+`
 layout(location=0) in vec2 aQ; out vec3 vW;
 void main(){ vec3 w=vec3(uCam.x+aQ.x*5000.,0.,uCam.z+aQ.y*5000.); vW=w; gl_Position=uVP*vec4(w,1.); }`;
 const GROUND_FS=COMMON+`
-uniform sampler2D uRefl; uniform vec2 uRes; uniform vec4 uGar[5];
+uniform sampler2D uRefl; uniform vec2 uRes; uniform vec4 uGar[6];
 in vec3 vW; out vec4 o;
 void main(){
   vec2 p=vW.xz; vec3 V=normalize(uCam-vW); float dist=length(uCam-vW);
@@ -532,20 +545,20 @@ void main(){
   col+=ring*.03*near;
   // garage pads: green-and-black hazard stripes painted on the street
   float pulse=.75+.25*sin(uTime*4.);
-  for(int i=0;i<5;i++){
+  for(int i=0;i<6;i++){
     vec4 g=uGar[i]; if(g.z<.5)continue;
     vec2 d=p-g.xy, ad=abs(d); float m=max(ad.x,ad.y); if(m>10.)continue;
     vec3 grn=vec3(.04,1.,.22);
     vec3 pad;
     if(m>7.4){
       float st=step(.5,fract((d.x+d.y)/4.));
-      pad=mix(vec3(0.),grn*1.05*pulse,st);
+      pad=mix(vec3(0.),grn*1.05*pulse*g.w,st);
     } else {
       pad=col*.35+grn*.05;
-      if(min(ad.x,ad.y)<.7&&m<4.5)pad=grn*1.1*pulse;
+      if(min(ad.x,ad.y)<.7&&m<4.5)pad=grn*1.1*pulse*g.w;
     }
     float edge=max(smoothstep(.25,0.,abs(m-7.4)),smoothstep(.25,0.,abs(m-9.85)));
-    pad=mix(pad,grn*1.4,edge);
+    pad=mix(pad,grn*1.4*g.w,edge);
     pad+=refl*fres*.12*step(.01,pad.g); // still wet: a little reflection on top of the paint
     col=pad;
   }
@@ -637,7 +650,7 @@ function program(vs,fs){const p=gl.createProgram();gl.attachShader(p,compile(gl.
   for(let i=0;i<n;i++){const info=gl.getActiveUniform(p,i);u[info.name]=gl.getUniformLocation(p,info.name);}
   return {p,u};}
 const P={box:program(BOX_VS,BOX_FS),sign:program(SIGN_VS,SIGN_FS),pt:program(PT_VS,PT_FS),beam:program(BEAM_VS,BEAM_FS),
-  rain:program(RAIN_VS,RAIN_FS),edge:program(EDGE_VS,EDGE_FS),steam:program(STEAM_VS,STEAM_FS),sky:program(FS_VS,SKY_FS),ground:program(GROUND_VS,GROUND_FS),
+  rain:program(RAIN_VS,RAIN_FS),edge:program(EDGE_VS,EDGE_FS),steam:program(STEAM_VS,STEAM_FS),sky:program(FS_VS,SKY_FS),ground:program(GROUND_VS,GROUND_FS),pad:program(PAD_VS,PAD_FS),
   bright:program(FS_VS,BRIGHT_FS),blur:program(FS_VS,BLUR_FS),post:program(FS_VS,POST_FS)};
 
 function buffer(data,usage){const b=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,b);gl.bufferData(gl.ARRAY_BUFFER,data,usage||gl.STATIC_DRAW);return b;}
@@ -803,7 +816,7 @@ function towerTop(cx,cz,h,r){ // antenna and blinking beacon
     } else if(t<.115&&!edge){ // megablock with a fly-through tunnel
       const H=300+R()*130,y0=58+R()*95,th=28,tw=16,seed=R(),alongX=R()<.5;cell.h=H;cell.bridge=false;
       box(cx,y0/2,cz,33,y0/2,33,{seed,emis:1});box(cx,(y0+th+H)/2,cz,33,(H-y0-th)/2,33,{seed});
-      const sw=(33-tw)/2, so=tw+sw, ym=y0+th/2;tunnels.push({x:cx,y:ym,z:cz,alongX});
+      const sw=(33-tw)/2, so=tw+sw, ym=y0+th/2;tunnels.push({x:cx,y:ym,z:cz,alongX,floor:y0,roof:H});
       const col=pick([PAL[1],PAL[0],PAL[2]]);
       if(alongX){box(cx,ym,cz-so,33,th/2,sw,{seed});box(cx,ym,cz+so,33,th/2,sw,{seed});
         for(const s of [-1,1]){const x=cx+s*33.3;
@@ -939,7 +952,8 @@ const ptBuf=buffer(new Float32Array(pts)), ptCount=pts.length/14;
 const ptVAO=vao([{buf:ptBuf,stride:14,attrs:[[0,3],[1,3],[2,2],[3,3],[4,3]]}]);
 const dynPts=new Float32Array(14*900), dynPtBuf=buffer(dynPts,gl.DYNAMIC_DRAW);
 const dynPtVAO=vao([{buf:dynPtBuf,stride:14,attrs:[[0,3],[1,3],[2,2],[3,3],[4,3]]}]);
-const DYN_BEAMS=2+5, beamData=new Float32Array(beams.length+DYN_BEAMS*11), beamBuf=buffer(beamData,gl.DYNAMIC_DRAW); beamData.set(beams,DYN_BEAMS*11);
+const DYN_BEAMS=2+6, beamData=new Float32Array(beams.length+DYN_BEAMS*11), beamBuf=buffer(beamData,gl.DYNAMIC_DRAW); beamData.set(beams,DYN_BEAMS*11);
+const GAR_MAX=6,padData=new Float32Array(GAR_MAX*4),padBuf=buffer(padData,gl.DYNAMIC_DRAW),padVAO=vao([{buf:quadBuf,stride:2,attrs:[[0,2]]},{buf:padBuf,stride:4,div:1,attrs:[[1,4]]}]);
 const beamVAO=vao([{buf:quadBuf,stride:2,attrs:[[0,2]]},{buf:beamBuf,stride:11,div:1,attrs:[[1,3],[2,3],[3,2],[4,3]]}]);
 const groundVAO=vao([{buf:quadBuf,stride:2,attrs:[[0,2]]}]);
 const RAIN_N=9000, rainData=new Float32Array(RAIN_N*8);
@@ -958,7 +972,7 @@ const carVAO=vao([{buf:cubeBuf,stride:6,attrs:[[0,3],[1,3]]},{buf:buffer(new Flo
 const carCount=carInst.length/17;
 
 // ------------------------------------------------------------------ render targets
-let RW=0,RH=0,quality=1,T={},reflMode=-1;
+let RW=0,RH=0,quality=1,T={},reflMode=-1,nPads=0;
 function target(w,h,o){o=o||{};const t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,t);
   const fl=o.hdr&&hasFloat;
   gl.texStorage2D(gl.TEXTURE_2D,o.mips?Math.floor(Math.log2(Math.max(w,h)))+1:1,fl?gl.RGBA16F:gl.RGBA8,w,h);
@@ -1234,8 +1248,8 @@ function controlsHtml(){
 }
 const MENU={
   main:()=>({items:[
-    {label:'Rival Rush',hint:'75 seconds on the clock. Fast deliveries buy time, slow ones buy none. Four Kuro cabs hunt you, and green garages fix your cab, once each.',act:()=>startGame('getaway')},
-    {label:'Rival Rush: Extreme',hint:'90 seconds, +5 s for every pickup, smaller delivery bonuses, harsher damage, no repairs for deliveries, three garages, and a faster gang that comes all at once.',act:()=>startGame('getaway',{extreme:true})},
+    {label:'Rival Rush',hint:'100 seconds on the clock, and every delivery buys more. Four Kuro cabs hunt you, and every wall you hit costs you.',act:()=>startGame('getaway')},
+    {label:'Rival Rush: Extreme',hint:'90 seconds, +5 s for every pickup, smaller delivery bonuses, harsher damage, no repairs for deliveries, garages that come and go, and a faster gang that comes all at once.',act:()=>startGame('getaway',{extreme:true})},
     {label:'Meter Madness',hint:'Every passenger is on a clock. Miss three fares and the shift is over.',act:()=>startGame('shift')},
     {label:'Joy Ride',hint:'No clock and no gang. Take a fare if you feel like it.',act:()=>startGame('cruise')},
     {label:'High scores',hint:'The top ten for Rival Rush: Extreme, Rival Rush, Rival Rush with clocks off, and Meter Madness.',act:()=>{openMenu('scores');loadScores();}},
@@ -1330,6 +1344,12 @@ function toast(msg,dur){const t=$('toast');t.textContent=msg;t.classList.add('on
 function setLamp(jp,en,cls){const l=$('lamp');l.textContent=jp;l.className=cls||'';$('lampEn').textContent=en;}
 function starStr(r){const full=Math.floor(r),half=r-full>=.5;return '★'.repeat(full)+(half?'½':'')+'☆'.repeat(Math.max(0,5-full-(half?1:0)));}
 function newJob(){
+  if(mode==='getaway'&&!game.extreme){   // regular Rival Rush keeps its original fare picking
+    const here=pads.filter(p=>{const d=Math.hypot(p.x-car.x,p.z-car.z);return d>160&&d<760;});
+    const from=pick2(here.length?here:pads);
+    const far=pads.filter(p=>p!==from&&Math.hypot(p.x-from.x,p.z-from.z)>380&&Math.hypot(p.x-from.x,p.z-from.z)<1500);
+    const to=pick2(far.length?far:pads.filter(p=>p!==from));
+    return startJob(from,to);}
   const last=game.job&&game.job.to,dFrom=p=>Math.hypot(p.x-car.x,p.z-car.z);
   const here=pads.filter(p=>p!==last&&dFrom(p)>150&&dFrom(p)<700);
   const from=pick2(here.length?here:pads.filter(p=>p!==last));
@@ -1337,6 +1357,8 @@ function newJob(){
   const r=Math.random(),lo=r<.35?280:r<.75?600:1100,hi=r<.35?600:r<.75?1100:2100,target=lo+Math.random()*(hi-lo);
   const opts=pads.filter(p=>p!==from).map(p=>({p,e:Math.abs(Math.hypot(p.x-from.x,p.z-from.z)-target)})).sort((a,b)=>a.e-b.e).slice(0,3);
   const to=pick2(opts).p;
+  startJob(from,to);}
+function startJob(from,to){
   game.job={from,to,who:NAMES[Math.floor(Math.random()*NAMES.length)],dist:Math.hypot(to.x-from.x,to.z-from.z)};
   game.phase='pickup';game.board=0;game.fare=0;game.rating=5;
   game.tight=Math.max(.45,1-game.rides*.06);
@@ -1355,18 +1377,37 @@ function missFare(){
 }
 const pick2=a=>a[Math.floor(Math.random()*a.length)];
 // ------------------------------------------------------------------ garages: one-time repair pads on the street
-const garages=[],GAR_U=new Float32Array(20);
-function placeGarages(n){
-  garages.length=0;
-  for(let tries=0;garages.length<n&&tries<600;tries++){
+const garages=[],GAR_U=new Float32Array(24);
+// Extreme only. Up to six at once, each open for 25 to 40 seconds; the last six seconds it flashes, faster and faster.
+// About one in three sits inside the hole through a megablock, with its beacon rising from the roof.
+function spawnGarage(){
+  if(garages.length>=GAR_MAX)return;
+  const far=(x,z)=>Math.hypot(x-car.x,z-car.z)>=350&&!garages.some(g=>Math.hypot(g.x-x,g.z-z)<300);
+  const life=25+Math.random()*15,base={used:false,hold:0,told:false,life,left:life,fl:1};
+  if(Math.random()<1/3){const ts=tunnels.filter(t=>far(t.x,t.z));
+    if(ts.length){const t=pick2(ts);garages.push(Object.assign(base,{x:t.x,z:t.z,y:t.floor,tun:true,roof:t.roof}));return;}}
+  for(let tries=0;tries<200;tries++){
     const x=-HALF+(4+Math.floor(Math.random()*(N-7)))*C,z=-HALF+(4+Math.floor(Math.random()*(N-7)))*C;
-    if(Math.hypot(x-car.x,z-car.z)<350||garages.some(g=>Math.hypot(g.x-x,g.z-z)<500))continue;
-    garages.push({x,z,used:false,hold:0,told:false});
-  }
+    if(!far(x,z))continue;
+    garages.push(Object.assign(base,{x,z,y:0,tun:false}));return;}
 }
+function placeGarages(extreme){
+  garages.length=0;game.garNext=0;
+  if(!extreme)return;
+  const n=1+Math.floor(Math.random()*3);for(let i=0;i<n;i++)spawnGarage();
+  game.garNext=3+Math.random()*12;
+}
+function sfxFizzle(){ if(!A.ctx)return; const c=A.ctx,t=c.currentTime,o=c.createOscillator(),g=c.createGain();o.type='sawtooth';
+  o.frequency.setValueAtTime(900,t);o.frequency.exponentialRampToValueAtTime(120,t+.35);g.gain.setValueAtTime(.0001,t);g.gain.exponentialRampToValueAtTime(.08,t+.02);g.gain.exponentialRampToValueAtTime(.0001,t+.4);
+  o.connect(g);g.connect(A.sfx);o.start(t);o.stop(t+.45);}
 function updateGarages(dt){
+  if(!game.extreme)return;
+  game.garNext-=dt;if(game.garNext<=0){spawnGarage();game.garNext=3+Math.random()*12;}
+  for(let i=garages.length-1;i>=0;i--){const g=garages[i];g.left-=dt;
+    if(g.used||g.left<=0){if(!g.used){const near=Math.hypot(car.x-g.x,car.z-g.z)<160;if(near)sfxFizzle();if(g.hold>0)toast('Too late. That garage closed.',2.2);}garages.splice(i,1);continue;}
+    if(g.left<6){const e=6-g.left,ph=e*(2+e*.8);g.fl=(ph%1)<.5?1:.12;}else g.fl=1;}
   for(const g of garages){if(g.used)continue;
-    const inside=Math.abs(car.x-g.x)<10&&Math.abs(car.z-g.z)<10&&car.y<11,slow=Math.hypot(car.vx,car.vy,car.vz)<12;
+    const inside=Math.abs(car.x-g.x)<10&&Math.abs(car.z-g.z)<10&&car.y>g.y-2&&car.y<g.y+11,slow=Math.hypot(car.vx,car.vy,car.vz)<12;
     if(!inside){g.hold=Math.max(0,g.hold-dt*2);g.told=false;continue;}
     const bd=$('board');bd.style.opacity=1;bd.firstElementChild.style.width=Math.min(100,g.hold*100)+'%';
     if(game.hull>=99.5){if(!g.told){g.told=true;toast('Your cab is in perfect shape. Save this garage for later.',2.6);}g.hold=0;continue;}
@@ -1380,8 +1421,8 @@ function startGame(m,opt){
   Object.assign(car,{x:0,y:70,z:48,vx:0,vy:0,vz:0,yaw:0,yr:0,roll:0,pitch:0});
   Object.assign(cam,{x:0,y:74.2,z:35.5,lookYaw:0,lookPitch:0});
   Object.assign(game,{total:0,rides:0,starsSum:0,hitCool:0,strikes:0,hinted:false,hull:100,wrecks:0,near:1e9,onTail:0,extreme:!!(opt&&opt.extreme),boost:100,boosting:false,boostTold:false,endReason:'',rideLeft:0,rideTotal:1});
-  game.shiftTime=game.extreme?90:75;
-  resetChasers();sparks.length=0;trail.length=0;placeGarages(m==='getaway'?(game.extreme?3:5):0);$('fareClk').textContent='';
+  game.shiftTime=game.extreme?90:100;
+  resetChasers();sparks.length=0;trail.length=0;placeGarages(m==='getaway'&&game.extreme);$('fareClk').textContent='';
   $('hud').classList.add('on');$('totalYen').textContent='¥0';$('clock').textContent='';$('hull').textContent='';Object.assign(hp,{shown:100,lag:100,until:time+2.5,lt:time});
   newJob();showStrikes();toast(m==='shift'?'Follow the diamond. Every fare is on the clock.':m==='getaway'?(game.extreme?'Extreme. The whole gang is coming. Good luck.':'Work fast. The Kuro cabs know you are on their turf.'):'No clock. Take fares if you feel like it.',3.5);
 }
@@ -1556,8 +1597,8 @@ function collideTraffic(dt){
 function updateCar(dt){
   const f=[Math.sin(car.yaw),Math.cos(car.yaw)], l=[Math.cos(car.yaw),-Math.sin(car.yaw)];
   let vf=car.vx*f[0]+car.vz*f[1], vl=car.vx*l[0]+car.vz*l[1];
-  // in Rival Rush boost burns fuel: about six and a half seconds from full, topped up a little by each fare
-  const fuel=mode==='getaway';
+  // in Rival Rush: Extreme boost burns fuel: about six and a half seconds from full, topped up a little by each fare
+  const fuel=mode==='getaway'&&game.extreme;
   game.boosting=inp.boost&&(!fuel||game.boost>0);
   if(fuel&&game.boosting){game.boost=Math.max(0,game.boost-dt*15);if(game.boost<=0&&!game.boostTold){game.boostTold=true;toast('Out of boost. Deliver fares to earn more.',2.4);}}
   if(game.boost>0)game.boostTold=false;
@@ -1600,23 +1641,24 @@ function updateJob(dt){
       toast(j.who+' is in. '+Math.round(j.dist)+' m to go.'+(pickT?'  +'+pickT+' s':''));
     } else {
       const fare=800+j.dist*9,tip=game.rating*140,bonus=mode==='shift'&&SET.clocks?Math.floor(Math.max(0,game.jobTime))*25:0,total=fare+tip+bonus;
-      game.total+=total;game.rides++;game.starsSum+=game.rating;game.hull=Math.min(100,game.hull+(mode==='getaway'?(game.extreme?0:10):30));
+      game.total+=total;game.rides++;game.starsSum+=game.rating;game.hull=Math.min(100,game.hull+(mode==='getaway'&&game.extreme?0:30));
       // like Crazy Taxi: time is earned only by delivering quickly
       let rate='',addT=0;
-      if(mode==='getaway'&&clk()){const f=game.rideLeft/game.rideTotal;rate=f>=.45?'Speedy':f>=.15?'Normal':'Slow';
+      if(mode==='getaway'&&!game.extreme&&clk()){addT=Math.round(18+j.dist/45);game.shiftTime+=addT;}   // regular Rival Rush: the original time bonus
+      if(mode==='getaway'&&game.extreme){const f=game.rideLeft/game.rideTotal;rate=f>=.45?'Speedy':f>=.15?'Normal':'Slow';
         addT=Math.round((rate==='Speedy'?6+j.dist/110:rate==='Normal'?3+j.dist/250:0)*(game.extreme?.8:1));game.shiftTime+=addT;}
-      let addB=0;if(mode==='getaway'){addB=(rate==='Speedy'?30:rate==='Slow'?10:20)-(game.extreme?5:0);addB=Math.round(Math.min(addB,100-game.boost));game.boost+=addB;}
+      let addB=0;if(mode==='getaway'&&game.extreme){addB=(rate==='Speedy'?30:rate==='Slow'?10:20)-(game.extreme?5:0);addB=Math.round(Math.min(addB,100-game.boost));game.boost+=addB;}
       $('totalYen').textContent=yen(game.total);sfxChime([72,76,79,84]);rumble(.4,200);
       const stars=starStr(game.rating);
       newJob();
-      toast('+'+yen(total)+'  '+stars+(bonus?'  including '+yen(bonus)+' for speed':'')+(rate?'  '+rate+(addT?' +'+addT+' s':''):'')+(addB?'  +'+addB+'% boost':''),3.2);
+      toast('+'+yen(total)+'  '+stars+(bonus?'  including '+yen(bonus)+' for speed':'')+(rate?'  '+rate:'')+(addT?' +'+addT+' s':'')+(addB?'  +'+addB+'% boost':''),3.2);
     }
   }
   if(mode==='shift'&&SET.clocks){game.jobTime-=dt;const c=$('clock');c.textContent=Math.max(0,Math.ceil(game.jobTime));c.className=game.jobTime<10?'low':'';
     if(game.jobTime<=0)missFare();}
   else if(mode==='getaway'&&clk()){
     const fc=$('fareClk');
-    if(game.phase==='ride'){game.rideLeft-=dt;const f=game.rideLeft/game.rideTotal,t='Fare '+Math.max(0,Math.ceil(game.rideLeft))+' s',cl=f>=.45?'g':f>=.15?'y':'r';
+    if(game.phase==='ride'&&game.extreme){game.rideLeft-=dt;const f=game.rideLeft/game.rideTotal,t='Fare '+Math.max(0,Math.ceil(game.rideLeft))+' s',cl=f>=.45?'g':f>=.15?'y':'r';
       if(fc.textContent!==t)fc.textContent=t;if(fc.className!==cl)fc.className=cl;
       if(game.rideLeft<=0){const who=j.who;sfxThud(16);rumble(.5,260);newJob();toast(who+' gave up and jumped out. No fare.',3);}}
     else if(fc.textContent)fc.textContent='';
@@ -1635,13 +1677,13 @@ function updateJob(dt){
 //   Nami     comes in for one swipe, then loses her nerve and runs for her corner
 // Up close with a clear line of sight, any of them drops the plan and goes straight for you.
 const GANG=[
-  {name:'Kage',col:[.62,.30,1],wait:5,corner:[1,1],top:84,acc:60,turn:1.0,grip:1.0,hp:60,ram:8,
+  {name:'Kage',col:[.62,.30,1],wait:5,corner:[1,1],top:108,topX:84,acc:60,turn:1.0,grip:1.0,hp:60,ram:8,
    tip:'Kage 影 follows your trail exactly. An all-rounder.'},
-  {name:'Hayate',col:[.50,1,.12],wait:10,corner:[-1,1],top:90,acc:72,turn:.85,grip:.8,hp:32,ram:6,
+  {name:'Hayate',col:[.50,1,.12],wait:10,corner:[-1,1],top:122,topX:90,acc:72,turn:.85,grip:.8,hp:32,ram:6,
    tip:'Hayate 疾風 heads you off. Fastest of the gang, but one good crash finishes him. Boost to get away.'},
-  {name:'Kitsune',col:[.15,.42,1],wait:16,corner:[1,-1],top:80,acc:58,turn:1.3,grip:1.25,hp:45,ram:7,
+  {name:'Kitsune',col:[.15,.42,1],wait:16,corner:[1,-1],top:100,topX:80,acc:58,turn:1.3,grip:1.25,hp:45,ram:7,
    tip:'Kitsune 狐 comes round the other side. Corners better than you.'},
-  {name:'Nami',col:[1,.12,.62],wait:23,corner:[-1,-1],top:76,acc:48,turn:.8,grip:.9,hp:120,ram:14,
+  {name:'Nami',col:[1,.12,.62],wait:23,corner:[-1,-1],top:94,topX:76,acc:48,turn:.8,grip:.9,hp:120,ram:14,
    tip:'Nami 波 is armoured and hits hardest, then backs off.'}];
 const chasers=[], crumbs=[], bursts=[]; let crumbBase=0, scatterT=0, chaseClock=0;
 const CH_MAX=4, chData=new Float32Array(17*6*CH_MAX), chBuf=buffer(chData,gl.DYNAMIC_DRAW);
@@ -1754,9 +1796,9 @@ function updateChase(dt){
     let err=Math.atan2(tx-c.x,tz-c.z)-c.yaw;err=Math.atan2(Math.sin(err),Math.cos(err));
     const maxYr=st.turn*(2.0-.75*Math.min(1,Math.abs(fwd)/70));
     c.yr+=(clamp(err*3.2,-maxYr,maxYr)-c.yr)*Math.min(1,dt*7);c.yaw+=c.yr*dt;
-    const top=clamp(car.speed*1.08,70,st.top*(game.extreme?1.1:1))*(c.kind===0||c.direct?1:.96),ae=Math.abs(err);
+    const top=clamp(car.speed*1.08,70,(game.extreme?st.topX*1.1:st.top))*(c.kind===0||c.direct?1:.96),ae=Math.abs(err);
     let vT=Math.min(slow,ae>1.3?14:top*(1-ae/2.4));
-    if(c.direct&&dP<30)vT=Math.min(Math.max(vT,car.speed+6),st.top*(game.extreme?1.1:1)*1.04);   // the gang has no boost
+    if(c.direct&&dP<30)vT=game.extreme?Math.min(Math.max(vT,car.speed+6),st.topX*1.1*1.04):Math.max(vT,car.speed+6);   // in Extreme the gang has no boost
     fwd+=fwd<vT?Math.min(vT-fwd,st.acc*(game.extreme?1.15:1)*dt):-Math.min(fwd-vT,70*dt);
     lat*=Math.exp(-3.4*st.grip*dt);
     const s2=Math.sin(c.yaw),c2=Math.cos(c.yaw);c.vx=s2*fwd+c2*lat;c.vz=c2*fwd-s2*lat;
@@ -1869,8 +1911,10 @@ function fillDynamic(){
     put(q[0],q[1],q[2],c,sz,0);put(q[3],q[4],q[5],c,sz,0);}
   for(const s of sparks){const k=1-s.t/s.life;put(s.x,s.y,s.z,[1.8*k,1.0*k,.35*k],.42,0);}
   // garages: a green square on the street with lights chasing round it, and a cross in the middle
-  if(mode==='getaway')for(const g of garages){if(g.used)continue;
-    for(let k=0;k<32;k++){const t=k/32*4,sd=Math.floor(t),f=t-sd,a=-9+18*f,px=[a,9,-a,-9][sd],pz=[-9,a,9,-a][sd];put(g.x+px,.7,g.z+pz,[.15,1.2,.45],1.3,.02+k/32*.96);}
+  nPads=0;
+  if(mode==='getaway')for(const g of garages){if(g.used)continue;const L=g.fl;
+    for(let k=0;k<32;k++){const t=k/32*4,sd=Math.floor(t),f=t-sd,a=-9+18*f,px=[a,9,-a,-9][sd],pz=[-9,a,9,-a][sd];put(g.x+px,g.y+.7,g.z+pz,[.15*L,1.2*L,.45*L],1.3,.02+k/32*.96);}
+    if(g.tun)padData.set([g.x,g.y,g.z,L],4*nPads++);
     }
   let bn=0;
   if(game.job&&(state==='play'||state==='paused')){
@@ -1881,7 +1925,8 @@ function fillDynamic(){
   }
   if(!bn)beamData.fill(0,0,22);
   beamData.fill(0,22,DYN_BEAMS*11);
-  if(mode==='getaway'&&(state==='play'||state==='paused'))garages.forEach((g,i)=>{if(!g.used&&i<5)beamData.set([g.x,0,g.z,0,0,0,170,5,.06,.75,.28],22+i*11);});
+  // beacons reach high over the rooftops; a pad inside a building sends its beam up from the roof
+  if(mode==='getaway'&&(state==='play'||state==='paused'))garages.forEach((g,i)=>{if(!g.used&&i<GAR_MAX){const L=g.fl,b=g.tun?g.roof:0;beamData.set([g.x,b,g.z,0,0,0,(g.tun?220:440),g.tun?6:5,.06*L,.75*L,.28*L],22+i*11);}});
   gl.bindBuffer(gl.ARRAY_BUFFER,dynPtBuf);gl.bufferSubData(gl.ARRAY_BUFFER,0,dynPts.subarray(0,n*14));
   gl.bindBuffer(gl.ARRAY_BUFFER,beamBuf);gl.bufferSubData(gl.ARRAY_BUFFER,0,beamData.subarray(0,DYN_BEAMS*11));
   return n;
@@ -1899,7 +1944,7 @@ function renderScene(mirror,nDyn,model,H,nCh){
   gl.bindVertexArray(emptyVAO);gl.drawArrays(gl.TRIANGLES,0,3);
   gl.enable(gl.DEPTH_TEST);gl.depthMask(true);gl.disable(gl.CULL_FACE);
   if(mirror>0){u=common(P.ground,1);gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,T.refl.t);gl.uniform1i(u.uRefl,0);gl.uniform2f(u.uRes,RW,RH);
-    for(let i=0;i<5;i++){const g=garages[i],on=mode==='getaway'&&g&&!g.used;GAR_U[i*4]=g?g.x:0;GAR_U[i*4+1]=g?g.z:0;GAR_U[i*4+2]=on?1:0;}
+    for(let i=0;i<GAR_MAX;i++){const g=garages[i],on=mode==='getaway'&&g&&!g.used&&!g.tun;GAR_U[i*4]=g?g.x:0;GAR_U[i*4+1]=g?g.z:0;GAR_U[i*4+2]=on?1:0;GAR_U[i*4+3]=g?g.fl:1;}
     if(u['uGar[0]'])gl.uniform4fv(u['uGar[0]'],GAR_U);
     gl.bindVertexArray(groundVAO);gl.drawArrays(gl.TRIANGLE_STRIP,0,4);}
   gl.enable(gl.CULL_FACE);gl.frontFace(mirror>0?gl.CCW:gl.CW);
@@ -1909,6 +1954,7 @@ function renderScene(mirror,nDyn,model,H,nCh){
   if(nCh){gl.bindVertexArray(chVAO);gl.drawArraysInstanced(gl.TRIANGLES,0,36,nCh);}
   gl.uniformMatrix4fv(u.uModel,false,model);gl.bindVertexArray(carVAO);gl.drawArraysInstanced(gl.TRIANGLES,0,36,carCount);
   gl.disable(gl.CULL_FACE);
+  if(mirror>0&&nPads){common(P.pad,1);gl.bindBuffer(gl.ARRAY_BUFFER,padBuf);gl.bufferSubData(gl.ARRAY_BUFFER,0,padData.subarray(0,nPads*4));gl.bindVertexArray(padVAO);gl.drawArraysInstanced(gl.TRIANGLE_STRIP,0,4,nPads);}
   u=common(P.sign,mirror);gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,atlasTex);gl.uniform1i(u.uAtlas,0);
   gl.bindVertexArray(signVAO);gl.drawArraysInstanced(gl.TRIANGLE_STRIP,0,4,signCount);
   gl.enable(gl.BLEND);gl.blendFunc(gl.ONE,gl.ONE);gl.depthMask(false);
@@ -1962,7 +2008,6 @@ function drawMini(){
   if(mode==='getaway')for(const c of chasers){if(!c.alive)continue;const q=plot(c.x,c.z);
     const rr=q[2]?3:4.6+(c.dist<100?1.4+1.4*Math.sin(time*14):0);g.beginPath();g.arc(q[0],q[1],rr,0,6.2832);g.fillStyle=cssCol(c.g.col);g.shadowColor=g.fillStyle;g.shadowBlur=7;g.fill();g.shadowBlur=0;
     if(!q[2]){g.beginPath();g.arc(q[0],q[1],8,-1.5708,-1.5708+6.2832*Math.max(0,c.hp/c.g.hp));g.lineWidth=1.6;g.strokeStyle=g.fillStyle;g.stroke();}}
-  if(mode==='getaway')for(const gr of garages){if(gr.used)continue;const q=plot(gr.x,gr.z);g.fillStyle='#3dff8a';g.shadowColor='#3dff8a';g.shadowBlur=6;g.fillRect(q[0]-3.5,q[1]-3.5,7,7);g.shadowBlur=0;}
   g.beginPath();g.moveTo(S/2,S/2-7);g.lineTo(S/2+5,S/2+5);g.lineTo(S/2-5,S/2+5);g.closePath();g.fillStyle='#ffb23e';g.fill();
 }
 // shown over the cab: at the start of a getaway shift, whenever the cab takes a hit or is repaired, and always when it is in a bad way
@@ -1986,7 +2031,7 @@ function drawHealth(){
 const bst={last:100,until:0};
 function drawBoost(){
   const b=$('bstBar');
-  if(mode!=='getaway'){b.style.opacity='0';return;}
+  if(mode!=='getaway'||!game.extreme){b.style.opacity='0';return;}
   if(game.boost>bst.last+.5){bst.until=time+2.5;}if(game.boosting||(game.boost<=0&&inp.boost))bst.until=Math.max(bst.until,time+1.2);bst.last=game.boost;
   const x=car.x,y=car.y+2.2,z=car.z,cw=VP[3]*x+VP[7]*y+VP[11]*z+VP[15];
   b.style.opacity=cw>0&&time<bst.until?'1':'0';if(cw<=0)return;
