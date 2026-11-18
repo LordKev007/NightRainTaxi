@@ -76,6 +76,7 @@ canvas#gl{position:fixed;inset:0;width:100%;height:100%;display:block}
 #ui{position:fixed;inset:0;display:none;align-items:center;
   background:linear-gradient(90deg,rgba(3,5,10,.92) 0,rgba(3,5,10,.66) 32%,rgba(3,5,10,.08) 64%,rgba(3,5,10,0) 100%)}
 #ui.on{display:flex}
+#ui{align-items:safe center;overflow-y:auto;padding:7vh 0}
 #uiCol{margin-left:7vw;width:min(540px,86vw);display:flex;flex-direction:column}
 #logo{display:flex;gap:26px;align-items:flex-end;margin-bottom:5.5vh}
 .blade{writing-mode:vertical-rl;font-family:var(--jp);font-weight:900;font-size:clamp(26px,4.6vh,44px);letter-spacing:.1em;line-height:1;
@@ -119,6 +120,20 @@ h1{font-size:clamp(44px,6.4vw,84px);font-weight:700;margin:0;letter-spacing:-.02
 .gp.st{color:#d9e2e8}
 .gp.dp{color:#d9e2e8;border-radius:5px;font-size:14px}
 #uiPane .gp{margin-right:4px}
+/* high scores */
+.ini3{display:flex;gap:14px;margin:6px 0 4px}
+.ini3 span{width:64px;height:80px;display:flex;align-items:center;justify-content:center;font-size:54px;font-weight:700;
+  border-bottom:3px solid rgba(255,255,255,.25);color:rgba(233,242,245,.6)}
+.ini3 span.cur{color:#fff;border-bottom-color:var(--amber);text-shadow:0 0 20px rgba(255,178,62,.65)}
+table.hs{border-collapse:collapse;font-size:17px;font-variant-numeric:tabular-nums;min-width:330px}
+#uiPane table.hs td{padding:3px 20px 3px 0}
+table.hs td.n{width:26px}
+table.hs .ini{font-weight:700;letter-spacing:.14em}
+table.hs .yen{color:var(--amber);text-align:right}
+table.hs .dif{font-size:13px;opacity:.55}
+table.hs tr.me td{opacity:1;color:#fff;text-shadow:0 0 14px rgba(255,178,62,.85)}
+table.hs tr.me .ini,table.hs tr.me .yen{color:var(--amber)}
+.hsEmpty,.hsNote{font-size:14px;opacity:.68;margin:6px 0 0;max-width:44ch;line-height:1.4}
 #fade{position:fixed;inset:0;background:#000;pointer-events:none;opacity:1;transition:opacity 1.8s ease-out}
 #fade.out{opacity:0}
 @media (prefers-reduced-motion:reduce){.blade{animation:none}.item,#bars i{transition:none}#fade{transition:opacity .2s}}
@@ -1119,8 +1134,8 @@ const OPT=[
   {key:'rumble',label:'Controller rumble',choices:['Off','On']},
   {key:'invert',label:'Climb',choices:['Push up to climb','Pull back to climb'],hint:'For the left stick and the ↑ ↓ keys. Space always climbs and C always dives.'},
   {key:'quality',label:'Picture quality',choices:['Auto','High','Medium','Low'],hint:'Auto lowers the resolution by itself if the game runs slowly.'}];
-OPT.unshift({key:'damage',label:'Damage',choices:['Easy','Medium','Hard'],hint:'How much walls, traffic and Kuro cab rams hurt your cab in a Getaway shift. Easy is about half, Hard is about one and a half times.'},
-  {key:'clocks',label:'Clocks',choices:['Off','On'],hint:'Off takes the countdowns out: no fare timers in a shift, and no shift clock in a Getaway shift.'});
+OPT.unshift({key:'damage',label:'Damage',choices:['Easy','Medium','Hard'],hint:'How much walls, traffic and Kuro cab rams hurt your cab in Rival Rush. Easy is about half, Hard is about one and a half times.'},
+  {key:'clocks',label:'Clocks',choices:['Off','On'],hint:'Off takes the countdowns out: no fare timers in Meter Madness, and no clock in Rival Rush. Rival Rush has its own clocks-off high score table; Meter Madness with clocks off has none.'});
 const OPT_PAGE={gameplay:['damage','clocks'],sound:['music','rain','sfx'],picture:['lens','blur','shake','quality'],controller:['rumble','invert']};
 const optPage=(name,head)=>()=>({head,items:OPT_PAGE[name].map(k=>OPT.find(o=>o.key===k)).map(o=>({opt:o,label:o.label,hint:o.hint||''}))
   .concat(name==='picture'?[{label:'Fullscreen',hint:'Also the F key. Needs a key press or a click, so it may not answer to the controller.',act:toggleFullscreen}]:[],[{label:'Back',act:back}])});
@@ -1148,11 +1163,12 @@ function controlsHtml(){
 }
 const MENU={
   main:()=>({items:[
-    {label:'Start a shift',hint:'Every passenger is on a clock. Miss three fares and the shift is over.',act:()=>startGame('shift')},
-    {label:'Getaway shift',hint:'100 seconds on the clock, and every delivery buys more. Four Kuro cabs hunt you, and every wall you hit costs you.',act:()=>startGame('getaway')},
-    {label:'Just cruise',hint:'No clock and no gang. Take a fare if you feel like it.',act:()=>startGame('cruise')},
-    {label:'Options',hint:'Sound levels, rain on the lens, picture quality.',act:()=>openMenu('options')},
-    {label:'Controls',hint:'Xbox controller and keyboard.',act:()=>openMenu('controls')}]}),
+    {label:'Rival Rush',hint:'100 seconds on the clock, and every delivery buys more. Four Kuro cabs hunt you, and every wall you hit costs you.',act:()=>startGame('getaway')},
+    {label:'Meter Madness',hint:'Every passenger is on a clock. Miss three fares and the shift is over.',act:()=>startGame('shift')},
+    {label:'Joy Ride',hint:'No clock and no gang. Take a fare if you feel like it.',act:()=>startGame('cruise')},
+    {label:'High scores',hint:'The top ten for Rival Rush, Rival Rush with clocks off, and Meter Madness.',act:()=>{openMenu('scores');loadScores();}},
+    {label:'Options',hint:'Damage, clocks, sound and picture.',act:()=>openMenu('options')},
+    {label:'Controls',hint:'Controller and keyboard.',act:()=>openMenu('controls')}]}),
   options:()=>({head:'Options',items:[
     {label:'Gameplay',hint:'Damage level and clocks.',act:()=>openMenu('gameplay')},
     {label:'Sound',hint:'Music, rain and engine volumes.',act:()=>openMenu('sound')},
@@ -1160,15 +1176,19 @@ const MENU={
     {label:'Controller',hint:'Rumble and which way is up.',act:()=>openMenu('controller')},
     {label:'Back',act:back}]}),
   gameplay:optPage('gameplay','Gameplay'),sound:optPage('sound','Sound'),picture:optPage('picture','Picture'),controller:optPage('controller','Controller'),
+  scores:()=>({head:'High scores',items:Object.keys(TABLE_NAMES).map(k=>({label:TABLE_NAMES[k],hint:TABLE_HINT[k],pane:()=>scoreTable(k,-1),act:()=>{}}))
+    .concat([{label:'Back',act:back}])}),
+  initials:()=>({head:'New high score',stats:['<b>'+yen(HS.pending.score)+'</b> makes the '+TABLE_NAMES[HS.pending.table]+' top ten. Enter your initials.'],
+    pane:'<div class="ini3">'+[0,1,2].map(k=>'<span'+(k===HS.slot?' class="cur"':'')+'>'+String.fromCharCode(65+HS.letters[k])+'</span>').join('')+'</div>',items:[]}),
   controls:()=>({head:'Controls',pane:controlsHtml(),items:[{label:'Back',act:back}]}),
   pause:()=>({head:'Paused',items:[
     {label:'Keep driving',act:togglePause},{label:'Options',act:()=>openMenu('options')},{label:'Controls',act:()=>openMenu('controls')},
-    {label:'End shift',hint:'Stop here and see how the night went.',act:()=>{closeMenus();endShift();}}]}),
+    {label:'End shift',hint:'Stop here and see how the night went.',act:()=>{closeMenus();endShift('Shift over');}}]}),
   over:()=>({head:game.endReason||'Shift over',stats:[
     '<b>'+yen(game.total)+'</b> earned',
     game.rides+(game.rides===1?' fare delivered':' fares delivered')+(mode==='getaway'?', '+game.wrecks+(game.wrecks===1?' Kuro cab wrecked':' Kuro cabs wrecked'):''),
     game.rides?'Average rating '+(game.starsSum/game.rides).toFixed(1)+' ★':'No one made it to their stop'],
-    items:[{label:'Drive again',act:()=>startGame(mode)},{label:'Title screen',act:toTitle}]})
+    pane:overPane(),items:[{label:'Drive again',act:()=>startGame(mode)},{label:'Title screen',act:toTitle}]})
 };
 const ui=$('ui');
 let menuStack=[],selStack=[],sel=0,items=[],menuLock=0;
@@ -1176,7 +1196,7 @@ const uiOpen=()=>menuStack.length>0;
 function openRoot(name){menuStack=[name];selStack=[0];renderMenu();ui.classList.add('on');$('bars').classList.toggle('on',name==='main');}
 function openMenu(name){menuStack.push(name);selStack.push(0);renderMenu();}
 function closeMenus(){menuStack=[];ui.classList.remove('on');$('bars').classList.remove('on');}
-function back(){if(menuStack.length>1){menuStack.pop();selStack.pop();renderMenu();sfxTick();}else if(state==='paused')togglePause();}
+function back(){if(topMenu()==='initials'){if(HS.slot>0){HS.slot--;renderMenu();sfxTick();}return;}if(menuStack.length>1){menuStack.pop();selStack.pop();renderMenu();sfxTick();}else if(state==='paused')togglePause();}
 function valHtml(o){const v=SET[o.key];return o.max?'<span class="bar"><i style="width:'+(v/o.max*100)+'%"></i></span>'+v:(o.choices[v]||'');}
 function renderMenu(){
   const name=menuStack[menuStack.length-1],m=MENU[name]();items=m.items;
@@ -1188,20 +1208,23 @@ function renderMenu(){
     b.addEventListener('mouseenter',()=>setSel(i));b.addEventListener('click',()=>{setSel(i);activate();});list.appendChild(b);});
   setSel(Math.min(selStack[selStack.length-1]||0,items.length-1));drawKeys();
 }
-function setSel(i){sel=i;selStack[selStack.length-1]=i;const ch=$('uiList').children;for(let k=0;k<ch.length;k++)ch[k].classList.toggle('sel',k===i);$('uiHint').textContent=(items[i]&&items[i].hint)||'';}
-function move(d){if(!items.length)return;setSel((sel+d+items.length)%items.length);sfxTick();}
-function adjust(d){const it=items[sel];if(!it||!it.opt)return;const o=it.opt,n=o.max?o.max+1:o.choices.length;
+function setSel(i){sel=i;selStack[selStack.length-1]=i;const ch=$('uiList').children;for(let k=0;k<ch.length;k++)ch[k].classList.toggle('sel',k===i);$('uiHint').textContent=(items[i]&&items[i].hint)||'';if(items[i]&&items[i].pane)$('uiPane').innerHTML=items[i].pane();}
+const topMenu=()=>menuStack[menuStack.length-1];
+function move(d){if(topMenu()==='initials'){HS.letters[HS.slot]=(HS.letters[HS.slot]-d+26)%26;renderMenu();sfxTick();return;}if(!items.length)return;setSel((sel+d+items.length)%items.length);sfxTick();}
+function adjust(d){if(topMenu()==='initials'){HS.slot=clamp(HS.slot+d,0,2);renderMenu();sfxTick();return;}const it=items[sel];if(!it||!it.opt)return;const o=it.opt,n=o.max?o.max+1:o.choices.length;
   SET[o.key]=o.max?clamp(SET[o.key]+d,0,o.max):(SET[o.key]+d+n)%n;saveSet();applySettings();
   $('uiList').children[sel].querySelector('.val').innerHTML=valHtml(o);sfxTick();}
-function activate(){if(menuLock>0)return;const it=items[sel];if(!it)return;
+function activate(){if(menuLock>0)return;if(topMenu()==='initials'){if(HS.slot<2){HS.slot++;renderMenu();sfxTick();}else{sfxTick(1);submitScore();}return;}const it=items[sel];if(!it)return;
   if(it.opt){const o=it.opt;if(o.max&&SET[o.key]>=o.max){SET[o.key]=-1;}adjust(1);return;}
   sfxTick(1);it.act();}
 function drawKeys(){if(!uiOpen())return;const pad=lastDev==='pad',name=menuStack[menuStack.length-1];
+  if(name==='initials'){$('uiKeys').innerHTML=pad?gpDpad+'Letter'+gpBtn(0)+'Next'+gpBtn(1)+'Back':'<b>A–Z</b>Type<b>↑ ↓</b>Letter<b>Enter</b>Next';return;}
   let h=pad?gpBtn(0)+'Select':'<b>Enter</b>Select';
   if(items.some(it=>it.opt))h+=pad?gpDpad+'Change':'<b>← →</b>Change';
   if(name!=='main'&&name!=='over')h+=pad?gpBtn(1)+'Back':'<b>Esc</b>Back';
   $('uiKeys').innerHTML=h;}
 function menuKey(e){const c=e.code;
+  if(topMenu()==='initials'&&/^Key[A-Z]$/.test(c)){if(!e.repeat&&menuLock<=0){HS.letters[HS.slot]=c.charCodeAt(3)-65;if(HS.slot<2)HS.slot++;renderMenu();sfxTick();}e.preventDefault();return;}
   if(c==='ArrowUp'||c==='KeyW')move(-1);else if(c==='ArrowDown'||c==='KeyS')move(1);
   else if(c==='ArrowLeft'||c==='KeyA')adjust(-1);else if(c==='ArrowRight'||c==='KeyD')adjust(1);
   else if(c==='Enter'||c==='Space'){if(!e.repeat)activate();}
@@ -1254,7 +1277,7 @@ function missFare(){
 }
 const pick2=a=>a[Math.floor(Math.random()*a.length)];
 function startGame(m){
-  initAudio();mode=m;state='play';closeMenus();
+  initAudio();mode=m;state='play';closeMenus();HS.last=null;HS.lastTable=null;HS.status='';loadScores();
   Object.assign(car,{x:0,y:70,z:48,vx:0,vy:0,vz:0,yaw:0,yr:0,roll:0,pitch:0});
   Object.assign(cam,{x:0,y:74.2,z:35.5,lookYaw:0,lookPitch:0});
   Object.assign(game,{total:0,rides:0,starsSum:0,hitCool:0,strikes:0,hinted:false,hull:100,wrecks:0,near:1e9,onTail:0,shiftTime:100,endReason:''});
@@ -1262,7 +1285,60 @@ function startGame(m){
   $('hud').classList.add('on');$('totalYen').textContent='¥0';$('clock').textContent='';$('hull').textContent='';Object.assign(hp,{shown:100,lag:100,until:time+2.5,lt:time});
   newJob();showStrikes();toast(m==='shift'?'Follow the diamond. Every fare is on the clock.':m==='getaway'?'Work fast. The Kuro cabs know you are on their turf.':'No clock. Take fares if you feel like it.',3.5);
 }
-function endShift(reason){if(state!=='play')return;game.endReason=reason||'';state='over';$('hud').classList.remove('on');menuLock=.8;openRoot('over');}
+function endShift(reason){if(state!=='play'&&state!=='paused')return;game.endReason=reason||'';state='over';$('hud').classList.remove('on');menuLock=.8;
+  const t=tableFor(),score=Math.round(game.total);HS.lastTable=t;HS.last=null;HS.status='';
+  if(t&&qualifies(t,score)){
+    let saved='';try{saved=localStorage.getItem('nrt-initials')||'';}catch(e){}
+    HS.letters=/^[A-Z]{3}$/.test(saved)?[...saved].map(ch=>ch.charCodeAt(0)-65):[0,0,0];HS.slot=0;
+    HS.pending={table:t,score,fares:game.rides,wrecks:game.wrecks,damage:SET.damage};openRoot('initials');
+  } else openRoot('over');
+}
+// ------------------------------------------------------------------ high scores
+// Shared tables live on a small Cloudflare Worker at SCORE_URL. Until that is set, or whenever it cannot be
+// reached, scores are kept in this browser instead, so the game always works.
+const SCORE_URL='https://night-rain-taxi-scores.battlesim.workers.dev';
+const TABLE_NAMES={hunted:'Rival Rush',huntedFree:'Rival Rush, clocks off',nightShift:'Meter Madness'};
+const TABLE_HINT={hunted:'Rival Rush with the clock on.',huntedFree:'Rival Rush with Clocks set to Off: it lasts until your cab is wrecked.',nightShift:'Meter Madness with the clock on.'};
+const blankTables=()=>({hunted:[],huntedFree:[],nightShift:[]});
+const HS={tables:blankTables(),online:false,status:'',last:null,lastTable:null,pending:null,slot:0,letters:[0,0,0]};
+function localTables(){try{return Object.assign(blankTables(),JSON.parse(localStorage.getItem('nrt-scores')||'{}'));}catch(e){return blankTables();}}
+function saveLocal(t){try{localStorage.setItem('nrt-scores',JSON.stringify(t));}catch(e){}}
+const scoreEndpoint=()=>SCORE_URL.replace(/\/+$/,'')+'/scores';
+async function loadScores(){
+  if(SCORE_URL){try{const r=await fetch(scoreEndpoint(),{cache:'no-store'});if(!r.ok)throw 0;const j=await r.json();HS.tables=Object.assign(blankTables(),j.tables);HS.online=true;}
+    catch(e){HS.tables=localTables();HS.online=false;}}
+  else{HS.tables=localTables();HS.online=false;}
+  const n=uiOpen()&&topMenu();if(n==='scores'||n==='over')renderMenu();
+}
+function tableFor(){return mode==='getaway'?(SET.clocks?'hunted':'huntedFree'):(mode==='shift'&&SET.clocks?'nightShift':null);}
+function qualifies(t,score){const l=HS.tables[t]||[];return score>0&&(l.length<10||score>l[l.length-1].s);}
+async function submitScore(){
+  const p=HS.pending;if(!p)return;HS.pending=null;
+  const ini=HS.letters.map(n=>String.fromCharCode(65+n)).join('');try{localStorage.setItem('nrt-initials',ini);}catch(e){}
+  let rank=-1,done=false;
+  if(SCORE_URL){try{
+    const r=await fetch(scoreEndpoint(),{method:'POST',headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify({table:p.table,initials:ini,score:p.score,fares:p.fares,wrecks:p.wrecks,damage:p.damage})});
+    const j=await r.json();
+    if(r.ok){HS.tables=Object.assign(blankTables(),j.tables);rank=j.rank;HS.online=true;done=true;if(rank<0)HS.status='Someone beat you to it: that score just missed the top ten.';}
+    else HS.status=(j.error||'The high score list turned that score down.')+' It is saved on this computer instead.';
+  }catch(e){HS.status='Could not reach the high score list, so this score is saved on this computer only.';}}
+  if(!done){const t=localTables(),l=t[p.table],e={i:ini,s:p.score,d:p.damage,t:Date.now()};
+    l.push(e);l.sort((a,b)=>b.s-a.s||a.t-b.t);rank=l.indexOf(e);t[p.table]=l.slice(0,10);if(rank>=10)rank=-1;saveLocal(t);HS.tables=t;HS.online=false;}
+  HS.last={table:p.table,rank};menuLock=.5;openRoot('over');
+}
+function scoreTable(t,hl){
+  const l=HS.tables[t]||[],esc=x=>String(x).replace(/[^A-Z0-9]/g,'?');
+  const note=HS.online?'':'<p class="hsNote">'+(SCORE_URL?'The shared list could not be reached, so these are the scores on this computer.':'These are the scores on this computer.')+'</p>';
+  if(!l.length)return '<p class="hsEmpty">No scores yet. Be the first.</p>'+note;
+  return '<table class="hs">'+l.map((e,i)=>'<tr'+(i===hl?' class="me"':'')+'><td class="n">'+(i+1)+'</td><td class="ini">'+esc(e.i)+'</td><td class="yen">'+yen(e.s)+'</td><td class="dif">'+
+    (t!=='nightShift'?(['Easy','Medium','Hard'][e.d]||''):'')+'</td></tr>').join('')+'</table>'+note;
+}
+function overPane(){
+  if(!HS.lastTable)return mode==='shift'&&!SET.clocks?'<p class="hsNote">Meter Madness with clocks off has no high score table.</p>':'';
+  return '<p class="hsNote" style="margin:0 0 6px">'+TABLE_NAMES[HS.lastTable]+' top ten</p>'+scoreTable(HS.lastTable,HS.last&&HS.last.table===HS.lastTable?HS.last.rank:-1)+(HS.status?'<p class="hsNote">'+HS.status+'</p>':'');
+}
+
 function toTitle(){
   state='menu';$('hud').classList.remove('on');game.job=null;
   Object.assign(car,{x:0,y:70,z:48,vx:0,vy:0,vz:0,yaw:0,yr:0,roll:0,pitch:0});
@@ -1803,10 +1879,10 @@ function updateFx(dt){
 let last=performance.now(),fpsAcc=0,fpsN=0,autoQ=true,warm=0;
 function frame(now){
   requestAnimationFrame(frame);
-  let dt=Math.min(.05,(now-last)/1000);last=now;
+  const rawDt=Math.min(1,(now-last)/1000);let dt=Math.min(.05,rawDt);last=now;
   resize();
   readInput();
-  if(menuLock>0)menuLock-=dt;
+  if(menuLock>0)menuLock-=rawDt;
   if(uiOpen())menuPad(dt);
   if(state!=='paused'){
     time+=dt;
@@ -1847,8 +1923,9 @@ canvas.addEventListener('webglcontextlost',e=>{e.preventDefault();const f=$('fat
 applySettings();
 setLamp('空車','Vacant','');
 openRoot('main');
+loadScores();
 setTimeout(()=>$('fade').classList.add('out'),350);
-window.__nrt={car,game,cam,pads,traffic,tunnels,env,SET,sparks,flow,get scatter(){return scatterT;},menuKey:c=>menuKey({code:c,repeat:false,preventDefault(){}}),get menu(){return menuStack.slice();},get sel(){return sel;},togglePause,get time(){return time;},snap(){cam.x=car.x-Math.sin(car.yaw)*12.5;cam.y=car.y+4.2;cam.z=car.z-Math.cos(car.yaw)*12.5;},startGame,endShift,step(n){for(let i=0;i<n;i++){readInput();time+=1/60;if(state==='play'){updateCar(1/60);updateJob(1/60);if(state==='play'&&mode==='getaway')updateChase(1/60);}updateEnv(1/60);updateFx(1/60);}},chasers,vents:steamI.filter((v,i)=>i%48<3),get state(){return state;},stats:{instCount,signCount,ptCount,rCount,pads:pads.length,traffic:traffic.length}};
+window.__nrt={HS,car,game,cam,pads,traffic,tunnels,env,SET,sparks,flow,get scatter(){return scatterT;},menuKey:c=>menuKey({code:c,repeat:false,preventDefault(){}}),get menu(){return menuStack.slice();},get sel(){return sel;},togglePause,get time(){return time;},snap(){cam.x=car.x-Math.sin(car.yaw)*12.5;cam.y=car.y+4.2;cam.z=car.z-Math.cos(car.yaw)*12.5;},startGame,endShift,step(n){for(let i=0;i<n;i++){readInput();time+=1/60;if(state==='play'){updateCar(1/60);updateJob(1/60);if(state==='play'&&mode==='getaway')updateChase(1/60);}updateEnv(1/60);updateFx(1/60);}},chasers,vents:steamI.filter((v,i)=>i%48<3),get state(){return state;},stats:{instCount,signCount,ptCount,rCount,pads:pads.length,traffic:traffic.length}};
 requestAnimationFrame(frame);
 })();
 </script>
