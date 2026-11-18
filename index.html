@@ -58,6 +58,12 @@ canvas#gl{position:fixed;inset:0;width:100%;height:100%;display:block}
 @media (prefers-reduced-motion:reduce){#threats i.hot{animation:none}}
 #totalYen{font-size:30px;font-weight:700;color:var(--amber)}
 #totalLbl,#padState{font-size:13px;opacity:.75}
+#endBanner{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;opacity:0;transition:opacity .25s;
+  background:radial-gradient(ellipse at center,rgba(3,5,10,.55) 0,rgba(3,5,10,0) 60%)}
+#endBanner.on{opacity:1}
+#endBig{font-size:clamp(48px,8vw,104px);font-weight:700;letter-spacing:.04em;color:var(--amber);text-shadow:0 0 28px rgba(255,178,62,.8),0 0 4px #000;text-transform:uppercase}
+#endBanner.wreck #endBig{color:var(--pink);text-shadow:0 0 30px rgba(255,61,139,.9),0 0 4px #000}
+#endSub{font-size:22px;margin-top:8px;text-shadow:0 0 10px #000,0 0 2px #000}
 #toast{position:absolute;left:50%;top:162px;transform:translateX(-50%);font-size:22px;font-weight:600;text-align:center;
   text-shadow:0 0 14px #000,0 0 3px #000;opacity:0;transition:opacity .25s;white-space:nowrap}
 #toast.on{opacity:1}
@@ -159,6 +165,7 @@ table.hs tr.me .ini,table.hs tr.me .yen{color:var(--amber)}
   <div id="hpBar"><div class="trk"><i class="lag"></i><i class="fill"></i></div><span></span></div>
   <div id="board"><i></i></div>
   <div id="toast"></div>
+  <div id="endBanner"><div id="endBig"></div><div id="endSub"></div></div>
 </div>
 
 <div id="bars"><i></i><i></i></div>
@@ -1178,14 +1185,14 @@ const MENU={
   gameplay:optPage('gameplay','Gameplay'),sound:optPage('sound','Sound'),picture:optPage('picture','Picture'),controller:optPage('controller','Controller'),
   scores:()=>({head:'High scores',items:Object.keys(TABLE_NAMES).map(k=>({label:TABLE_NAMES[k],hint:TABLE_HINT[k],pane:()=>scoreTable(k,-1),act:()=>{}}))
     .concat([{label:'Back',act:back}])}),
-  initials:()=>({head:'New high score',stats:['<b>'+yen(HS.pending.score)+'</b> makes the '+TABLE_NAMES[HS.pending.table]+' top ten. Enter your initials.'],
+  initials:()=>({head:game.endReason||'New high score',stats:[endWhy(),'New high score: <b>'+yen(HS.pending.score)+'</b> makes the '+TABLE_NAMES[HS.pending.table]+' top ten. Enter your initials.'],
     pane:'<div class="ini3">'+[0,1,2].map(k=>'<span'+(k===HS.slot?' class="cur"':'')+'>'+String.fromCharCode(65+HS.letters[k])+'</span>').join('')+'</div>',items:[]}),
   controls:()=>({head:'Controls',pane:controlsHtml(),items:[{label:'Back',act:back}]}),
   pause:()=>({head:'Paused',items:[
     {label:'Keep driving',act:togglePause},{label:'Options',act:()=>openMenu('options')},{label:'Controls',act:()=>openMenu('controls')},
     {label:'End shift',hint:'Stop here and see how the night went.',act:()=>{closeMenus();endShift('Shift over');}}]}),
   over:()=>({head:game.endReason||'Shift over',stats:[
-    '<b>'+yen(game.total)+'</b> earned',
+    endWhy()+' <b>'+yen(game.total)+'</b> earned.',
     game.rides+(game.rides===1?' fare delivered':' fares delivered')+(mode==='getaway'?', '+game.wrecks+(game.wrecks===1?' Kuro cab wrecked':' Kuro cabs wrecked'):''),
     game.rides?'Average rating '+(game.starsSum/game.rides).toFixed(1)+' ★':'No one made it to their stop'],
     pane:overPane(),items:[{label:'Drive again',act:()=>startGame(mode)},{label:'Title screen',act:toTitle}]})
@@ -1285,7 +1292,19 @@ function startGame(m){
   $('hud').classList.add('on');$('totalYen').textContent='¥0';$('clock').textContent='';$('hull').textContent='';Object.assign(hp,{shown:100,lag:100,until:time+2.5,lt:time});
   newJob();showStrikes();toast(m==='shift'?'Follow the diamond. Every fare is on the clock.':m==='getaway'?'Work fast. The Kuro cabs know you are on their turf.':'No clock. Take fares if you feel like it.',3.5);
 }
-function endShift(reason){if(state!=='play'&&state!=='paused')return;game.endReason=reason||'';state='over';$('hud').classList.remove('on');menuLock=.8;
+// how a shift ends: a short moment on the scene with a banner saying why, then the scores
+const END_WHY={'Out of time':'The clock ran out.','Cab wrecked':'Your cab took too much damage.','Shift over':'You ended the shift.'};
+const endWhy=()=>END_WHY[game.endReason]||'';
+let endT=0;
+function endShift(reason){if(state!=='play'&&state!=='paused')return;game.endReason=reason||'Shift over';closeMenus();
+  if(state==='paused'){finishShift();return;}
+  $('endBig').textContent=game.endReason;$('endSub').textContent=endWhy();
+  const wreck=game.endReason==='Cab wrecked';$('endBanner').className='on'+(wreck?' wreck':'');$('toast').classList.remove('on');
+  if(wreck){bursts.push({x:car.x,y:car.y,z:car.z,t:0});spawnSparks(car.x,car.y,car.z,0,1,0,40);sfxThud(45);rumble(1,600);hitFx=1;shake=1.4*SET.shake;}
+  else sfxChime([76,72,67,60]);
+  state='ending';endT=performance.now()+2600;
+}
+function finishShift(){$('endBanner').classList.remove('on');state='over';$('hud').classList.remove('on');menuLock=.8;
   const t=tableFor(),score=Math.round(game.total);HS.lastTable=t;HS.last=null;HS.status='';
   if(t&&qualifies(t,score)){
     let saved='';try{saved=localStorage.getItem('nrt-initials')||'';}catch(e){}
@@ -1889,6 +1908,7 @@ function frame(now){
     if(state==='play'){updateCar(dt);updateJob(dt);if(state==='play'&&mode==='getaway')updateChase(dt);}
     else {car.vx*=.95;car.vz*=.95;car.vy*=.9;car.speed=Math.hypot(car.vx,car.vz);car.roll*=.95;car.pitch*=.95;}
     updateEnv(dt);updateFx(dt);
+    if(state==='ending'&&performance.now()>=endT)finishShift();
     if(time>nextBolt){const bd=Math.random();flash=lerp(1,.3,bd);nextBolt=time+9+Math.random()*24;sfxThunder(bd);}
     flash=flash>0.02?flash*Math.exp(-dt*(4+6*Math.sin(time*31)*Math.sin(time*31))):0;
     shake=Math.max(shake-dt*3,env.rush*.07);hitFx=Math.max(0,hitFx-dt*2.2);
