@@ -237,7 +237,7 @@ table.hs tr.me .ini,table.hs tr.me .yen{color:var(--amber)}
 <script>
 "use strict";
 // The version shown in Options. The desktop app reads it from this line to decide whether an update is newer.
-const GAME_VERSION='10.19';
+const GAME_VERSION='10.20';
 // Present only inside the Windows / Steam Deck app (see desktop/preload.js): update, quit, fullscreen.
 const DESK=window.nrtDesktop||null;
 (function(){
@@ -1389,7 +1389,7 @@ function controlsHtml(){
 const MENU={
   main:()=>({items:[
     {label:'Rival Rush',hint:'100 seconds on the clock, and every delivery buys more. Four Kuro cabs hunt you, and every wall you hit costs you.',act:()=>startGame('getaway')},
-    {label:'Rival Rush: Extreme',hint:'90 seconds, +5 s for every pickup, smaller delivery bonuses, harsher damage, no repairs for deliveries, garages that come and go, and a faster gang that comes all at once.',act:()=>startGame('getaway',{extreme:true})},
+    {label:'Rival Rush: Extreme',hint:'90 seconds, +5 s for every pickup, smaller delivery bonuses, harsher damage, no repairs for deliveries, garages that come and go (each repairs you and adds 30 seconds), and a faster gang that comes all at once.',act:()=>startGame('getaway',{extreme:true})},
     {label:'Meter Madness',hint:'Every passenger is on a clock. Miss three fares and the shift is over.',act:()=>startGame('shift')},
     {label:'Joy Ride',hint:'No clock and no gang. Take a fare if you feel like it.',act:()=>startGame('cruise')},
     {label:'High Scores',hint:'The top ten for Rival Rush: Extreme, Rival Rush, Rival Rush with clocks off, and Meter Madness.',act:()=>{openMenu('scores');loadScores();}},
@@ -1551,10 +1551,11 @@ function updateGarages(dt){
     const inside=Math.abs(car.x-g.x)<10&&Math.abs(car.z-g.z)<10&&car.y>g.y-2&&car.y<g.y+11,slow=Math.hypot(car.vx,car.vy,car.vz)<12;
     if(!inside){g.hold=Math.max(0,g.hold-dt*2);g.told=false;continue;}
     const bd=$('board');bd.style.opacity=1;bd.firstElementChild.style.width=Math.min(100,g.hold*100)+'%';
-    if(game.hull>=99.5){if(!g.told){g.told=true;toast('Your cab is in perfect shape. Save this garage for later.',2.6);}g.hold=0;continue;}
+    if(game.hull>=99.5&&!game.extreme){if(!g.told){g.told=true;toast('Your cab is in perfect shape. Save this garage for later.',2.6);}g.hold=0;continue;}
     if(!slow){if(toastT<=0)toast('Settle on the green square to repair 修理',.6);continue;}
     g.hold+=dt;
-    if(g.hold>=1){g.used=true;game.hull=100;sfxChime([67,72,76,79]);rumble(.4,250);toast('Repaired. Cab 100%  修理完了',2.6);}
+    if(g.hold>=1){g.used=true;game.hull=100;sfxChime([67,72,76,79]);rumble(.4,250);
+      if(game.extreme){game.shiftTime+=30;recEv('garage',18,'Pit stop +30 s');toast('Repaired. Cab 100%  +30 s  修理完了',2.6);}else toast('Repaired. Cab 100%  修理完了',2.6);}
   }
 }
 function startGame(m,opt){
