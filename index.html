@@ -48,6 +48,10 @@ canvas#gl{position:fixed;inset:0;width:100%;height:100%;display:block}
 #fps{position:fixed;right:14px;top:10px;font:600 13px/1 var(--ui);color:#c8ffd6;text-shadow:0 0 6px #000,0 0 2px #000;font-variant-numeric:tabular-nums;pointer-events:none;z-index:6}
 #fps:empty{display:none}
 #fps.g{color:#47e06a}
+.val .kk{font-weight:700;color:#fff;opacity:.9;margin-left:6px}
+.val .gp{font-size:.8em}
+body.cb #fps.g,body.cb #fareClk.g{color:#5ec8ff;text-shadow:0 0 12px rgba(94,200,255,.6)}
+body.cb #fps.r,body.cb #fareClk.r{color:#ff8a1e}
 #fps.y{color:#ffd23e}
 #fps.r{color:#ff4d6d}
 #speed{font-size:54px;font-weight:700;line-height:.9}
@@ -136,6 +140,16 @@ h1{font-size:clamp(44px,6.4vw,84px);font-weight:700;margin:0;letter-spacing:-.02
 #uiKeys{margin:14px 0 0 21px;font-size:13px;opacity:.62;min-height:22px}
 .dense .item{font-size:20px;padding:6px 0 6px 18px}
 .dense .item.sel{padding-left:28px}
+.xdense .item{font-size:17px;padding:4px 0 4px 18px}
+.xdense .item.sel{padding-left:26px}
+.item.sub>span:first-child{padding-left:20px;font-size:.88em;opacity:.85}
+.item.sub>span:first-child::before{content:'';display:inline-block;width:8px;height:1px;background:currentColor;opacity:.5;vertical-align:middle;margin:0 8px 0 -16px}
+#bench{position:fixed;left:50%;bottom:9vh;transform:translateX(-50%);text-align:center;pointer-events:none;opacity:0;transition:opacity .3s;text-shadow:0 0 10px #000,0 0 3px #000}
+#bench.on{opacity:1}
+#bench b{display:block;font-size:30px;letter-spacing:.04em}
+#bench .trk{width:320px;height:4px;margin:10px auto 6px;background:rgba(255,255,255,.18);border-radius:2px;overflow:hidden}
+#bench .trk i{display:block;height:100%;background:var(--amber)}
+#bench small{opacity:.75}
 .dense #uiHint{min-height:24px;margin-top:10px}
 #uiKeys b{display:inline-block;border:1px solid rgba(255,255,255,.55);border-radius:4px;padding:1px 7px;margin:0 7px 0 18px;font-weight:600}
 #uiKeys b:first-child{margin-left:0}
@@ -207,12 +221,13 @@ table.hs tr.me .ini,table.hs tr.me .yen{color:var(--amber)}
 </div>
 <div id="fade"></div>
 <div id="fps"></div>
+<div id="bench"><b></b><div class="trk"><i></i></div><small>Esc or B to stop</small></div>
 <div id="fatal"></div>
 
 <script>
 "use strict";
 // The version shown in Options. The desktop app reads it from this line to decide whether an update is newer.
-const GAME_VERSION='10.12';
+const GAME_VERSION='10.15';
 // Present only inside the Windows / Steam Deck app (see desktop/preload.js): update, quit, fullscreen.
 const DESK=window.nrtDesktop||null;
 (function(){
@@ -575,7 +590,7 @@ void main(){ vec3 c=texture(uT,vUV).rgb*.227027;
   o=vec4(c,1.); }`;
 const POST_FS=`#version 300 es
 precision highp float; in vec2 vUV; out vec4 o;
-uniform sampler2D uScene,uB2,uB4,uB8; uniform float uTime,uHit,uSpeed,uLens,uRush,uAsp,uMist; uniform vec2 uFlowA,uFlowB,uFlowV;
+uniform sampler2D uScene,uB2,uB4,uB8; uniform float uTime,uHit,uSpeed,uLens,uRush,uAsp,uMist,uGam; uniform vec2 uFlowA,uFlowB,uFlowV;
 float h(vec2 p){vec3 p3=fract(vec3(p.xyx)*.1031);p3+=dot(p3,p3.yzx+33.33);return fract((p3.x+p3.y)*p3.z);}
 float vn(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(h(i),h(i+vec2(1,0)),f.x),mix(h(i+vec2(0,1)),h(i+vec2(1,1)),f.x),f.y);}
 // Drops on the lens. The whole field is carried by 'shift', which the game accumulates from the cab's motion:
@@ -637,6 +652,7 @@ void main(){
   col=mix(vec3(l),col,1.12);
   col*=1.-.62*pow(r2c*2.4,1.25);
   col=pow(max(col,0.),vec3(1./2.2));
+  col=pow(col,vec3(uGam));
   col+=(h(gl_FragCoord.xy+fract(uTime)*91.)-.5)*.035;
   col+=vec3(.9,.2,.3)*uHit*r2c*1.4;
   o=vec4(col,1.);
@@ -1134,8 +1150,48 @@ function sfxThunder(dist){ if(!A.ctx)return; const c=A.ctx,t0=c.currentTime+.12+
 
 // ------------------------------------------------------------------ input
 const keys={}, padPrev=[]; let padSeen=false, lastDev='key', navCool=0;
+// Remappable controls. Each action has keyboard keys and one controller button (standard layout numbering).
+// Fixed, so you can always get around: sticks, arrow keys, Esc / P to pause, M, F, F3, and menu navigation.
+const ACTIONS=[
+  {id:'throttle',label:'Throttle',key:['KeyW'],pad:7},{id:'brake',label:'Brake',key:['KeyS'],pad:6},
+  {id:'boost',label:'Boost',key:['ShiftLeft','ShiftRight'],pad:0},
+  {id:'left',label:'Steer left',key:['KeyA'],pad:null,keyOnly:1},{id:'right',label:'Steer right',key:['KeyD'],pad:null,keyOnly:1},
+  {id:'climb',label:'Climb',key:['Space'],pad:12},{id:'dive',label:'Dive',key:['KeyC'],pad:13},
+  {id:'slideL',label:'Slide left',key:['KeyQ'],pad:4},{id:'slideR',label:'Slide right',key:['KeyE'],pad:5},
+  {id:'horn',label:'Horn',key:['KeyH'],pad:2},{id:'pause',label:'Pause',key:[],pad:9,padOnly:1}];
+const BIND_DEF=()=>({key:Object.fromEntries(ACTIONS.map(a=>[a.id,a.key.slice()])),pad:Object.fromEntries(ACTIONS.map(a=>[a.id,a.pad]))});
+let BIND=BIND_DEF();
+try{const sv=JSON.parse(localStorage.getItem('nrt-binds')||'null');if(sv&&sv.key&&sv.pad)for(const a of ACTIONS){if(Array.isArray(sv.key[a.id]))BIND.key[a.id]=sv.key[a.id].filter(x=>typeof x==='string');if(a.id in sv.pad)BIND.pad[a.id]=sv.pad[a.id];}}catch(e){}
+function saveBinds(){try{localStorage.setItem('nrt-binds',JSON.stringify(BIND));}catch(e){}}
+const RESERVED_KEYS=['Escape','KeyP','KeyM','KeyF','F3','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Enter','Tab','MetaLeft','MetaRight'];
+const kb=id=>BIND.key[id].some(c=>keys[c]);
+function keyName(c){if(!c)return '';const m={Space:'Space',ShiftLeft:'Shift',ShiftRight:'Right Shift',ControlLeft:'Ctrl',ControlRight:'Right Ctrl',AltLeft:'Alt',AltRight:'Right Alt',
+  Backspace:'Backspace',CapsLock:'Caps Lock',Semicolon:';',Quote:"'",Comma:',',Period:'.',Slash:'/',Backslash:'\\',BracketLeft:'[',BracketRight:']',Minus:'-',Equal:'=',Backquote:'`'};
+  if(m[c])return m[c];if(/^Key/.test(c))return c.slice(3);if(/^Digit/.test(c))return c.slice(5);if(/^Numpad/.test(c))return 'Num '+c.slice(6);return c;}
+// capture a new binding: the next key or controller button wins; it times out after five seconds
+let capture=null;
+function startCapture(a){capture={a,t:performance.now(),arm:performance.now()+300};renderMenu();}
+function endCapture(){capture=null;renderMenu();}
+function assignKey(a,code){
+  if(RESERVED_KEYS.includes(code)){toast(keyName(code)+' is kept for menus and shortcuts',1.8);return endCapture();}
+  const old=BIND.key[a.id][0];
+  for(const b of ACTIONS)if(b!==a&&BIND.key[b.id].includes(code))BIND.key[b.id]=BIND.key[b.id].filter(x=>x!==code).concat(old&&!BIND.key[b.id].includes(old)?[old]:[]);   // swap
+  BIND.key[a.id]=[code];saveBinds();sfxTick(1);endCapture();}
+function assignPad(a,i){
+  const old=BIND.pad[a.id];
+  for(const b of ACTIONS)if(b!==a&&BIND.pad[b.id]===i)BIND.pad[b.id]=old;   // swap
+  BIND.pad[a.id]=i;saveBinds();sfxTick(1);endCapture();}
+function captureTick(){
+  if(!capture)return;const now=performance.now();
+  if(now-capture.t>5000){endCapture();return;}
+  const el=$('capLeft');if(el)el.textContent=Math.ceil(5-(now-capture.t)/1000);
+  if(now<capture.arm||capture.a.keyOnly)return;
+  for(const i in padEdge){const n=+i;if(n<16){assignPad(capture.a,n);return;}}
+}
 function toggleFullscreen(){if(DESK){DESK.toggleFullscreen();return;}try{document.fullscreenElement?document.exitFullscreen():document.documentElement.requestFullscreen().catch(()=>{});}catch(_){}}
 addEventListener('keydown',e=>{
+  if(bench){e.preventDefault();if(e.code==='Escape'||e.code==='Backspace')benchEnd(false);return;}
+  if(capture){e.preventDefault();if(e.repeat)return;if(e.code==='Escape'){endCapture();return;}if(capture.a.padOnly){toast('Pause on the keyboard is always Esc or P',1.8);endCapture();return;}assignKey(capture.a,e.code);return;}
   if(e.code==='F3'){e.preventDefault();if(!e.repeat){SET.fps=SET.fps?0:1;saveSet();fpsT=.5;if(uiOpen())renderMenu();}return;}
   if(['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code))e.preventDefault();
   initAudio();
@@ -1145,7 +1201,7 @@ addEventListener('keydown',e=>{
   keys[e.code]=true;
   if(e.code==='Escape'||e.code==='KeyP')togglePause();
   if(e.code==='KeyM'){A.muted=!A.muted;applySettings();toast(A.muted?'Sound off':'Sound on');}
-  if(e.code==='KeyH')sfxHorn();
+  if(BIND.key.horn.includes(e.code))sfxHorn();
   if(e.code==='KeyF')toggleFullscreen();
 });
 addEventListener('keyup',e=>{keys[e.code]=false;});
@@ -1162,21 +1218,20 @@ const inp={steer:0,throttle:0,brake:0,climb:0,strafe:0,boost:false,lookX:0,lookY
 let padEdge={};
 function readInput(){
   const k=keys,inv=SET.invert?-1:1;
-  let steer=(k.KeyD||k.ArrowRight?1:0)-(k.KeyA||k.ArrowLeft?1:0), throttle=k.KeyW?1:0, brake=k.KeyS?1:0;
-  let climb=(k.Space?1:0)-(k.KeyC?1:0)+((k.ArrowUp?1:0)-(k.ArrowDown?1:0))*inv, strafe=(k.KeyE?1:0)-(k.KeyQ?1:0), boost=!!(k.ShiftLeft||k.ShiftRight), lx=0, ly=0;
+  let steer=(kb('right')||k.ArrowRight?1:0)-(kb('left')||k.ArrowLeft?1:0), throttle=kb('throttle')?1:0, brake=kb('brake')?1:0;
+  let climb=(kb('climb')?1:0)-(kb('dive')?1:0)+((k.ArrowUp?1:0)-(k.ArrowDown?1:0))*inv, strafe=(kb('slideR')?1:0)-(kb('slideL')?1:0), boost=kb('boost'), lx=0, ly=0;
   padEdge={};
   const g=getPad();
   if(g){
-    const b=i=>g.buttons[i]?g.buttons[i].value||(g.buttons[i].pressed?1:0):0;
+    const b=i=>i!=null&&g.buttons[i]?g.buttons[i].value||(g.buttons[i].pressed?1:0):0, pb=id=>b(BIND.pad[id]);
     if(!padSeen){padSeen=true;lastDev='pad';padStyle=padKind(g.id);$('padState').textContent='Controller on';if(uiOpen())renderMenu();}
     for(let i=0;i<g.buttons.length;i++){const p=b(i)>.5;if(p&&!padPrev[i])padEdge[i]=true;padPrev[i]=p;}
     if(g.mapping==='standard'){
-      steer+=dz(g.axes[0]||0); climb+=-dz(g.axes[1]||0)*inv+(b(12)-b(13));
-      throttle=Math.max(throttle,b(7)); brake=Math.max(brake,b(6)); strafe+=b(5)-b(4); boost=boost||b(0)>.5;
+      steer+=dz(g.axes[0]||0); climb+=-dz(g.axes[1]||0)*inv+(pb('climb')-pb('dive'));
+      throttle=Math.max(throttle,pb('throttle')); brake=Math.max(brake,pb('brake')); strafe+=pb('slideR')-pb('slideL'); boost=boost||pb('boost')>.5;
       lx=dz(g.axes[2]||0); ly=dz(g.axes[3]||0);
     } else { steer+=dz(g.axes[0]||0); climb+=-dz(g.axes[1]||0)*inv; throttle=Math.max(throttle,b(1)||b(7)); brake=Math.max(brake,b(0)||b(6)); }
-    if(padEdge[2]&&state==='play')sfxHorn();
-    if(padEdge[9])togglePause();
+    if(!capture){if(padEdge[BIND.pad.horn]&&state==='play')sfxHorn();if(padEdge[BIND.pad.pause])togglePause();}
   } else if(padSeen){padSeen=false;lastDev='key';$('padState').textContent='';drawKeys();}
   inp.steer=clamp(steer,-1,1);inp.throttle=clamp(throttle,0,1);inp.brake=clamp(brake,0,1);inp.climb=clamp(climb,-1,1);
   inp.strafe=clamp(strafe,-1,1);inp.boost=boost;inp.lookX=lx;inp.lookY=ly;
@@ -1185,7 +1240,8 @@ function rumble(strong,ms){if(!SET.rumble)return;const g=getPad();try{if(g&&g.vi
 
 // ------------------------------------------------------------------ settings and menus
 const SET={music:6,rain:8,sfx:7,lens:1,blur:1,shake:1,rumble:1,invert:0,quality:0,damage:1,clocks:1,fps:0,
-  c_res:2,c_refl:2,c_traffic:1,c_rainfx:2,c_steam:1,c_bloom:1};
+  c_res:2,c_refl:2,c_traffic:1,c_rainfx:2,c_steam:1,c_bloom:1,bright:5,cb:0};
+const DEFAULTS=Object.assign({},SET);
 // Picture detail. High, Medium and Low are fixed sets; Custom uses the c_ values; Auto starts on High and steps down if it has to.
 const DKEYS=['res','refl','traffic','rainfx','steam','bloom'];
 const PRESETS=[{res:2,refl:2,traffic:1,rainfx:2,steam:1,bloom:1},{res:1,refl:1,traffic:0,rainfx:1,steam:1,bloom:1},{res:0,refl:0,traffic:0,rainfx:1,steam:0,bloom:0}];
@@ -1194,11 +1250,48 @@ const dmgMul=()=>game.extreme?1.85:[.45,1,1.6][SET.damage];
 const clk=()=>SET.clocks||game.extreme;   // Extreme is always on the clock
 try{const sv=JSON.parse(localStorage.getItem('nrt-settings')||'{}');for(const k in SET)if(typeof sv[k]==='number')SET[k]=sv[k];}catch(e){}
 function saveSet(){try{localStorage.setItem('nrt-settings',JSON.stringify(SET));}catch(e){}}
+// ---------------------------------------------------------------- benchmark: the same flight down a street on each preset
+let bench=null,benchRes=null,benchPadB=false;
+const BENCH_WARM=1.2,BENCH_RUN=5.5;
+function startBench(){
+  if(state!=='menu')return;
+  closeMenus();$('toast').classList.remove('on');
+  bench={stage:0,res:[]};benchStage();$('bench').classList.add('on');
+}
+function benchStage(){
+  G=Object.assign({},PRESETS[bench.stage]);quality=[.55,.75,1][G.res];resize();
+  Object.assign(bench,{t0:performance.now(),n:0,sum:0,worst:0});
+}
+function benchTick(rawDt){
+  const el=(performance.now()-bench.t0)/1000;
+  if(el>=BENCH_WARM&&el<BENCH_WARM+BENCH_RUN){bench.n++;bench.sum+=rawDt;bench.worst=Math.max(bench.worst,rawDt);}
+  const all=(bench.stage+Math.min(1,el/(BENCH_WARM+BENCH_RUN)))/3;
+  $('bench').firstElementChild.textContent='Benchmark: '+['High','Medium','Low'][bench.stage]+'  '+(bench.stage+1)+' of 3';
+  $('bench').querySelector('i').style.width=(all*100).toFixed(1)+'%';
+  if(el>=BENCH_WARM+BENCH_RUN){
+    bench.res.push({fps:bench.n/Math.max(.001,bench.sum),low:1/Math.max(.001,bench.worst)});
+    if(++bench.stage<3)benchStage();else benchEnd(true);}
+}
+function benchEnd(done){
+  if(done){const r=bench.res;let rec=r.findIndex(x=>x.fps>=55);if(rec<0)rec=r.findIndex(x=>x.fps>=30);if(rec<0)rec=2;benchRes={r,rec};}
+  bench=null;$('bench').classList.remove('on');applySettings();
+  openRoot('main');openMenu('options');openMenu('graphics');if(done)openMenu('bench');
+}
+function benchPage(){
+  const {r,rec}=benchRes,P3=['High','Medium','Low'];
+  const rows=r.map((x,i)=>'<tr'+(i===rec?' style="color:#fff"':'')+'><td>'+P3[i]+(i===rec?' ★':'')+'</td><td>'+Math.round(x.fps)+' FPS</td><td>'+(1000/x.fps).toFixed(1)+' ms</td><td>'+Math.round(x.low)+' FPS</td></tr>').join('');
+  const why=r[rec].fps>=55?P3[rec]+' keeps a smooth 55+ frames a second on this machine.':r[rec].fps>=30?'Nothing reached 55 FPS. '+P3[rec]+' stays above 30.':'Even Low ran under 30 FPS here. Try Custom with Resolution 55% and everything off.';
+  return {head:'Benchmark results',stats:[why],
+    pane:'<table><tr><th>Preset</th><th>Average</th><th>Per frame</th><th>Slowest frame</th></tr>'+rows+'</table><p class="hsNote">Results can top out at your screen refresh rate (often 60 FPS).</p>',
+    items:[{label:'Use '+P3[rec],hint:'Sets Picture quality to '+P3[rec]+'.',act:()=>{SET.quality=rec+1;saveSet();applySettings();back();}},
+      {label:'Run again',act:()=>{menuStack.pop();selStack.pop();startBench();}},
+      {label:'Back',hint:'Keep the current settings.',act:back}]};
+}
 function applySettings(){
   autoQ=SET.quality===0;
   if(SET.quality===4){for(const k of DKEYS)G[k]=SET['c_'+k];}else G=Object.assign({},PRESETS[autoQ?autoLevel:SET.quality-1]);
   quality=[.55,.75,1][G.res];
-  resize();
+  resize();if(typeof paintThreats==='function'&&thReady)paintThreats();
   if(A.ctx){const t=A.ctx.currentTime;A.master.gain.setTargetAtTime(A.muted?0:1,t,.05);A.musicVol.gain.setTargetAtTime(SET.music/6,t,.1);
     A.rainVol.gain.setTargetAtTime(SET.rain/8,t,.1);A.sfx.gain.setTargetAtTime(SET.sfx/7,t,.1);}
 }
@@ -1207,6 +1300,8 @@ const OPT=[
   {key:'rain',label:'Rain and thunder',max:10},
   {key:'sfx',label:'Engine and city',max:10,hint:'Engine, wind, traffic, neon buzz and impacts.'},
   {key:'lens',label:'Rain on the lens',choices:['Off','Light','Heavy']},
+  {key:'bright',label:'Brightness',max:10,hint:'Lifts or deepens the dark parts of the picture. The menus and HUD stay the same.'},
+  {key:'cb',label:'Colour-blind colours',choices:['Off','Protanopia','Deuteranopia','Tritanopia'],hint:'Gives the four Kuro cabs, the minimap dots and the green timer colours a set that stays easy to tell apart. Protanopia and Deuteranopia are red-green; Tritanopia is blue-yellow.'},
   {key:'blur',label:'Boost blur',choices:['Off','On']},
   {key:'shake',label:'Camera shake',choices:['Off','On']},
   {key:'rumble',label:'Controller rumble',choices:['Off','On']},
@@ -1221,9 +1316,39 @@ const OPT=[
   {key:'c_bloom',detail:1,label:'Neon glow',choices:['Off','On'],hint:'The soft glow around bright lights.'}];
 OPT.unshift({key:'damage',label:'Damage',choices:['Easy','Medium','Hard'],hint:'How much walls, traffic and Kuro cab rams hurt your cab in Rival Rush. Easy is about half, Hard is about one and a half times.'},
   {key:'clocks',label:'Clocks',choices:['Off','On'],hint:'Off takes the countdowns out: no fare timers in Meter Madness, and no clock in Rival Rush. Rival Rush has its own clocks-off high score table; Meter Madness with clocks off has none.'});
-const OPT_PAGE={gameplay:['damage','clocks'],sound:['music','rain','sfx'],picture:['quality','lens','blur','shake','fps'],detail:['c_res','c_refl','c_traffic','c_rainfx','c_steam','c_bloom'],controller:['rumble','invert']};
+const RESET_KEYS={gameplay:['damage','clocks'],sound:['music','rain','sfx'],controller:['rumble','invert'],
+  graphics:['quality','c_res','c_refl','c_traffic','c_rainfx','c_steam','c_bloom','bright','cb','lens','blur','shake','fps']};
+let resetArm='';
+function resetItem(page){return {label:resetArm===page?'Press again to reset':'Reset to defaults',hint:'Puts every setting on this page back the way it started.',
+  act:()=>{if(resetArm!==page){resetArm=page;renderMenu();return;}resetArm='';for(const k of RESET_KEYS[page])SET[k]=DEFAULTS[k];saveSet();applySettings();renderMenu();toast('Settings reset',1.4);}};}
+function mappingsPage(){
+  const it=ACTIONS.map(a=>{
+    const capping=capture&&capture.a===a;
+    const val=capping?'<span style="color:var(--amber)">Press a button or key… <span id="capLeft">5</span></span>':
+      (a.keyOnly?'':gpAny(BIND.pad[a.id]))+(a.keyOnly||a.padOnly?'':'  ')+(a.padOnly?'<b class="kk">Esc / P</b>':'<b class="kk">'+(BIND.key[a.id].map(keyName).join(' / ')||'none')+'</b>');
+    return {label:a.label,valHtml:val,hint:a.keyOnly?'Keyboard only: the left stick always steers. Select, then press the new key.':a.padOnly?'Controller only: Esc and P always pause on the keyboard. Select, then press the new button.':'Select, then press the new controller button or keyboard key. If it is already in use, the two swap.',act:()=>startCapture(a)};});
+  it.push({label:'Reset to defaults',hint:'Puts every button and key back the way it started.',act:()=>{if(resetArm!=='binds'){resetArm='binds';renderMenu();return;}resetArm='';BIND=BIND_DEF();saveBinds();renderMenu();toast('Mappings reset',1.4);}},{label:'Back',act:back});
+  if(resetArm==='binds')it[it.length-2].label='Press again to reset';
+  return {head:'Mappings',pane:'<p class="hsNote" style="margin:0">'+gpStick('L')+' steers and climbs, '+gpStick('R')+' looks around. The arrow keys also steer and climb. Esc or P pauses, M mutes, F goes fullscreen, F3 shows the frame rate.</p>',items:it};
+}
+const OPT_PAGE={gameplay:['damage','clocks'],sound:['music','rain','sfx'],controller:['rumble','invert']};
 const optPage=(name,head)=>()=>({head,items:OPT_PAGE[name].map(k=>OPT.find(o=>o.key===k)).map(o=>({opt:o,label:o.label,hint:o.hint||''}))
-  .concat(name==='picture'?[{label:'Detail settings',hint:'Turn each effect on or off. Changing any of them switches Picture quality to Custom.',act:()=>openMenu('detail')},{label:'Fullscreen',hint:'Also the F key. Needs a key press or a click, so it may not answer to the controller.',act:toggleFullscreen}]:[],[{label:'Back',act:back}])});
+  .concat([resetItem(name),{label:'Back',act:back}])});
+// Graphics Options. Picking Custom opens the six detail settings right under Picture quality.
+const optItem=k=>{const o=OPT.find(x=>x.key===k);return {opt:o,label:o.label,hint:o.hint||''};};
+const DNAME={res:['Resolution',['55%','75%','100%']],refl:['reflections',['off','Low','High']],traffic:['traffic',['Low','High']],rainfx:['rain',['off','Light','Heavy']],steam:['steam',['off','on']],bloom:['glow',['off','on']]};
+function presetSummary(){
+  const q=SET.quality,name=q===0?'Auto (on '+['High','Medium','Low'][autoLevel]+' right now)':['','High','Medium','Low','Custom'][q];
+  return '<p class="hsNote" style="margin:0">'+name+': '+DKEYS.map(k=>k==='res'?'resolution '+DNAME.res[1][G.res]:DNAME[k][0]+' '+DNAME[k][1][G[k]]).join(', ')+'.</p>';}
+function graphicsPage(){
+  const q=optItem('quality');q.pane=presetSummary;
+  const it=[q];
+  if(SET.quality===4)for(const k of DKEYS){const d=optItem('c_'+k);d.sub=1;it.push(d);}
+  if(state==='menu')it.push({label:'Run benchmark',hint:'Flies through the city on High, Medium and Low, about 20 seconds, then suggests the best setting for this machine. Esc or '+'B'+' stops it.',act:startBench});
+  it.push(optItem('bright'),optItem('cb'),optItem('lens'),optItem('blur'),optItem('shake'),optItem('fps'),
+    {label:'Fullscreen',hint:'Also the F key. Needs a key press or a click, so it may not answer to the controller.',act:toggleFullscreen},resetItem('graphics'),{label:'Back',act:back});
+  return {head:'Graphics Options',items:it};
+}
 // Controller glyphs follow the pad that is plugged in. Buttons are named by position, as the browser reports them:
 // 0 bottom, 1 right, 2 left, 3 top. Xbox and Nintendo print different letters in those places.
 let padStyle='xbox';
@@ -1238,6 +1363,9 @@ const GLYPH={
   steam:{name:'Steam Controller',face:[['A','#47d35a'],['B','#ef4a43'],['X','#3d8ff0'],['Y','#f4c42b']],lb:'LB',rb:'RB',lt:'LT',rt:'RT',start:'▶'},
   nin:{name:'Nintendo controller',face:[['B','#e3e7ea'],['A','#e3e7ea'],['Y','#e3e7ea'],['X','#e3e7ea']],lb:'L',rb:'R',lt:'ZL',rt:'ZR',start:'+'}};
 function gpBtn(i){const f=GLYPH[padStyle].face[i];return '<span class="gp" style="color:'+f[1]+'">'+f[0]+'</span>';}
+function gpAny(i){if(i==null)return '<span class="hsNote">none</span>';if(i<4)return gpBtn(i);const G2=GLYPH[padStyle];
+  const nm={4:G2.lb,5:G2.rb,6:G2.lt,7:G2.rt,8:'View',9:G2.start,10:'L3',11:'R3',12:'D-pad ↑',13:'D-pad ↓',14:'D-pad ←',15:'D-pad →'}[i]||('Button '+i);
+  return '<span class="gp sh">'+nm+'</span>';}
 function gpSh(k){return '<span class="gp sh">'+GLYPH[padStyle][k]+'</span>';}
 const gpStick=s=>'<span class="gp st">'+s+'</span>', gpDpad='<span class="gp dp">✚</span>';
 function controlsHtml(){
@@ -1252,25 +1380,25 @@ const MENU={
     {label:'Rival Rush: Extreme',hint:'90 seconds, +5 s for every pickup, smaller delivery bonuses, harsher damage, no repairs for deliveries, garages that come and go, and a faster gang that comes all at once.',act:()=>startGame('getaway',{extreme:true})},
     {label:'Meter Madness',hint:'Every passenger is on a clock. Miss three fares and the shift is over.',act:()=>startGame('shift')},
     {label:'Joy Ride',hint:'No clock and no gang. Take a fare if you feel like it.',act:()=>startGame('cruise')},
-    {label:'High scores',hint:'The top ten for Rival Rush: Extreme, Rival Rush, Rival Rush with clocks off, and Meter Madness.',act:()=>{openMenu('scores');loadScores();}},
-    {label:'Options',hint:'Damage, clocks, sound and picture.',act:()=>openMenu('options')},
-    {label:'Controls',hint:'Controller and keyboard.',act:()=>openMenu('controls')}]
+    {label:'High Scores',hint:'The top ten for Rival Rush: Extreme, Rival Rush, Rival Rush with clocks off, and Meter Madness.',act:()=>{openMenu('scores');loadScores();}},
+    {label:'Options',hint:'Gameplay, sound, graphics, controller and button mappings.',act:()=>openMenu('options')}]
     .concat(DESK&&DS.latest?[{label:'Update to v'+DS.latest,hint:DS.msg||'A new version is out. It downloads in a moment and the game restarts.',act:deskUpdate}]:[])
     .concat(DESK?[{label:'Quit',hint:'Close the game.',act:()=>DESK.quit()}]:[])}),
   options:()=>({head:'Options',pane:'<p class="hsNote" style="margin:0 0 10px">'+versionText()+'</p>',items:[
     {label:'Gameplay',hint:'Damage level and clocks.',act:()=>openMenu('gameplay')},
     {label:'Sound',hint:'Music, rain and engine volumes.',act:()=>openMenu('sound')},
-    {label:'Picture',hint:'Picture quality and detail, rain on the lens, boost blur, camera shake, FPS counter, fullscreen.',act:()=>openMenu('picture')},
+    {label:'Graphics',hint:'Picture quality, detail settings, benchmark, rain on the lens, boost blur, camera shake, FPS counter, fullscreen.',act:()=>openMenu('graphics')},
     {label:'Controller',hint:'Rumble and which way is up.',act:()=>openMenu('controller')},
+    {label:'Mappings',hint:'What every button and key does.',act:()=>openMenu('controls')},
     {label:'Back',act:back}]}),
-  gameplay:optPage('gameplay','Gameplay'),sound:optPage('sound','Sound'),picture:optPage('picture','Picture'),detail:optPage('detail','Detail settings'),controller:optPage('controller','Controller'),
-  scores:()=>({head:'High scores',items:Object.keys(TABLE_NAMES).map(k=>({label:TABLE_NAMES[k],hint:TABLE_HINT[k],pane:()=>scoreTable(k,-1),act:()=>{}}))
+  gameplay:optPage('gameplay','Gameplay'),sound:optPage('sound','Sound'),graphics:graphicsPage,bench:benchPage,controller:optPage('controller','Controller'),
+  scores:()=>({head:'High Scores',items:Object.keys(TABLE_NAMES).map(k=>({label:TABLE_NAMES[k],hint:TABLE_HINT[k],pane:()=>scoreTable(k,-1),act:()=>{}}))
     .concat([{label:'Back',act:back}])}),
   initials:()=>({head:game.endReason||'New high score',stats:[endWhy(),'New high score: <b>'+yen(HS.pending.score)+'</b> makes the '+TABLE_NAMES[HS.pending.table]+' top ten. Enter your initials.'],
     pane:'<div class="ini3">'+[0,1,2].map(k=>'<span'+(k===HS.slot?' class="cur"':'')+'>'+String.fromCharCode(65+HS.letters[k])+'</span>').join('')+'</div>',items:[]}),
-  controls:()=>({head:'Controls',pane:controlsHtml(),items:[{label:'Back',act:back}]}),
+  controls:mappingsPage,
   pause:()=>({head:'Paused',items:[
-    {label:'Keep driving',act:togglePause},{label:'Options',act:()=>openMenu('options')},{label:'Controls',act:()=>openMenu('controls')},
+    {label:'Keep driving',act:togglePause},{label:'Options',act:()=>openMenu('options')},
     {label:'End shift',hint:'Stop here and see how the night went.',act:()=>{closeMenus();endShift('Shift over');}}]}),
   over:()=>({head:game.endReason||'Shift over',stats:[
     endWhy()+' <b>'+yen(game.total)+'</b> earned.',
@@ -1284,25 +1412,26 @@ const uiOpen=()=>menuStack.length>0;
 function openRoot(name){menuStack=[name];selStack=[0];renderMenu();ui.classList.add('on');$('bars').classList.toggle('on',name==='main');}
 function openMenu(name){menuStack.push(name);selStack.push(0);renderMenu();}
 function closeMenus(){menuStack=[];ui.classList.remove('on');$('bars').classList.remove('on');}
-function back(){if(topMenu()==='initials'){if(HS.slot>0){HS.slot--;renderMenu();sfxTick();}return;}if(menuStack.length>1){menuStack.pop();selStack.pop();renderMenu();sfxTick();}else if(state==='paused')togglePause();}
+function back(){resetArm='';if(topMenu()==='initials'){if(HS.slot>0){HS.slot--;renderMenu();sfxTick();}return;}if(menuStack.length>1){menuStack.pop();selStack.pop();renderMenu();sfxTick();}else if(state==='paused')togglePause();}
 function valHtml(o){const v=o.detail?G[o.key.slice(2)]:SET[o.key];return o.max?'<span class="bar"><i style="width:'+(v/o.max*100)+'%"></i></span>'+v:(o.choices[v]||'');}
 function renderMenu(){
   const name=menuStack[menuStack.length-1],m=MENU[name]();items=m.items;
-  ui.dataset.menu=name;ui.classList.toggle('dense',items.length>7);$('uiHead').textContent=m.head||'';$('uiStats').innerHTML=(m.stats||[]).map(x=>'<p>'+x+'</p>').join('');$('uiPane').innerHTML=m.pane||'';
+  ui.dataset.menu=name;ui.classList.toggle('dense',items.length>7);ui.classList.toggle('xdense',items.length>11);$('uiHead').textContent=m.head||'';$('uiStats').innerHTML=(m.stats||[]).map(x=>'<p>'+x+'</p>').join('');$('uiPane').innerHTML=m.pane||'';
   const list=$('uiList');list.textContent='';
   items.forEach((it,i)=>{const b=document.createElement('button');b.className='item';b.type='button';
+    if(it.sub)b.classList.add('sub');
     const l=document.createElement('span');l.textContent=it.label;b.appendChild(l);
-    if(it.opt){const v=document.createElement('span');v.className='val';v.innerHTML=valHtml(it.opt);b.appendChild(v);}
+    if(it.opt||it.valHtml){const v=document.createElement('span');v.className='val';v.innerHTML=it.opt?valHtml(it.opt):it.valHtml;b.appendChild(v);}
     b.addEventListener('mouseenter',()=>setSel(i));b.addEventListener('click',()=>{setSel(i);activate();});list.appendChild(b);});
   setSel(Math.min(selStack[selStack.length-1]||0,items.length-1));drawKeys();
 }
-function setSel(i){sel=i;selStack[selStack.length-1]=i;const ch=$('uiList').children;for(let k=0;k<ch.length;k++)ch[k].classList.toggle('sel',k===i);$('uiHint').textContent=(items[i]&&items[i].hint)||'';if(items[i]&&items[i].pane)$('uiPane').innerHTML=items[i].pane();}
+function setSel(i){if(resetArm&&i!==sel&&items[sel]&&/reset/i.test(items[sel].label)){resetArm='';const b=$('uiList').children[sel];if(b)b.firstElementChild.textContent='Reset to defaults';}sel=i;selStack[selStack.length-1]=i;const ch=$('uiList').children;for(let k=0;k<ch.length;k++)ch[k].classList.toggle('sel',k===i);$('uiHint').textContent=(items[i]&&items[i].hint)||'';if(items[i]&&items[i].pane)$('uiPane').innerHTML=items[i].pane();}
 const topMenu=()=>menuStack[menuStack.length-1];
 function move(d){if(topMenu()==='initials'){HS.letters[HS.slot]=(HS.letters[HS.slot]-d+26)%26;renderMenu();sfxTick();return;}if(!items.length)return;setSel((sel+d+items.length)%items.length);sfxTick();}
 function adjust(d){if(topMenu()==='initials'){HS.slot=clamp(HS.slot+d,0,2);renderMenu();sfxTick();return;}const it=items[sel];if(!it||!it.opt)return;const o=it.opt,n=o.max?o.max+1:o.choices.length;
   if(o.detail&&SET.quality!==4){for(const k of DKEYS)SET['c_'+k]=G[k];SET.quality=4;}
   SET[o.key]=o.max?clamp(SET[o.key]+d,0,o.max):(SET[o.key]+d+n)%n;saveSet();applySettings();
-  $('uiList').children[sel].querySelector('.val').innerHTML=valHtml(o);sfxTick();}
+  if(o.key==='quality')renderMenu();else $('uiList').children[sel].querySelector('.val').innerHTML=valHtml(o);sfxTick();}
 function activate(){if(menuLock>0)return;if(topMenu()==='initials'){if(HS.slot<2){HS.slot++;renderMenu();sfxTick();}else{sfxTick(1);submitScore();}return;}const it=items[sel];if(!it)return;
   if(it.opt){const o=it.opt;if(o.max&&SET[o.key]>=o.max){SET[o.key]=-1;}adjust(1);return;}
   sfxTick(1);it.act();}
@@ -1321,7 +1450,7 @@ function menuKey(e){const c=e.code;
   else if(c==='KeyF'){if(!e.repeat)toggleFullscreen();}
   else return;
   e.preventDefault();}
-function menuPad(dt){const g=getPad();if(!g)return;
+function menuPad(dt){const g=getPad();if(!g||capture)return;
   navCool-=dt;const ay=dz(g.axes[1]||0),ax2=dz(g.axes[0]||0);
   if(Math.abs(ay)<.3&&Math.abs(ax2)<.3)navCool=Math.min(navCool,0);
   const rdy=navCool<=0,up=padEdge[12]||(rdy&&ay<-.55),dn=padEdge[13]||(rdy&&ay>.55),lf=padEdge[14]||(rdy&&ax2<-.55),rg=padEdge[15]||(rdy&&ax2>.55);
@@ -1849,7 +1978,7 @@ function fillChasers(){
   let n=0;const fl=Math.floor(time*6)%2;
   const part=(c,ox,oy,oz,hx,hy,hz,kind,cl,emis)=>{const sy=Math.sin(c.yaw),cy=Math.cos(c.yaw);
     chData.set([c.x+ox*cy+oz*sy,c.y+oy,c.z-ox*sy+oz*cy,hx,hy,hz,.61,kind,c.yaw,emis,cl[0],cl[1],cl[2],0,0,0,0],n*17);n++;};
-  if(mode==='getaway')for(const c of chasers){if(!c.alive)continue;const g=c.g.col;
+  if(mode==='getaway')for(const c of chasers){if(!c.alive)continue;const g=gangCol(c.kind);
     part(c,0,0,-.1,1.35,.34,2.8,2,[.02,.02,.03],0);part(c,0,-.05,2.9,1.1,.24,.6,2,[.02,.02,.03],0);part(c,0,.56,-.4,1.02,.26,1.3,2,[g[0]*.09,g[1]*.09,g[2]*.09],0);
     part(c,0,.90,-.4,.95,.09,.16,3,g,fl?3.4:.7);part(c,0,-.42,-.1,1.15,.05,2.3,3,g,2.6);part(c,0,.06,-2.92,1.2,.07,.03,3,g,3);}
   if(n){gl.bindBuffer(gl.ARRAY_BUFFER,chBuf);gl.bufferSubData(gl.ARRAY_BUFFER,0,chData.subarray(0,n*17));}
@@ -1861,7 +1990,11 @@ let VP=IDENT, camF=[0,0,1], camR=[1,0,0], camU=[0,1,0], tanY=1, asp=1;
 function updateCamera(dt){
   const f=[Math.sin(car.yaw),0,Math.cos(car.yaw)];
   let ex,ey,ez,tx,ty,tz;
-  if(state==='menu'||state==='over'){
+  if(bench){   // the benchmark flies the same path down a street for every preset
+    const t=(performance.now()-bench.t0)/1000,bx=-HALF+Math.round(N/2)*C;
+    ex=bx+Math.sin(t*.5)*5;ey=48+Math.sin(t*.8)*7;ez=-220+t*52;tx=bx+Math.sin(t*.5+.7)*9;ty=ey-7;tz=ez+70;
+    cam.x=ex;cam.y=ey;cam.z=ez;
+  } else if(state==='menu'||state==='over'){
     const a=time*.07;ex=car.x+Math.sin(a)*11;ez=car.z+Math.cos(a)*11;ey=car.y+2.2+Math.sin(time*.13)*1.6;
     const ddx=car.x-ex,ddz=car.z-ez,dl=Math.hypot(ddx,ddz)||1;   // aim left of the cab so it sits clear of the menu
     tx=car.x+ddz/dl*4.4;ty=car.y+1.4;tz=car.z-ddx/dl*4.4;
@@ -1900,7 +2033,7 @@ function fillDynamic(){
   put(car.x,car.y+1.0,car.z,[1,.6,.15],1.6,0);
   if(mode==='getaway'){
     const fl=Math.floor(time*6)%2;
-    for(const c of chasers){if(!c.alive)continue;const sy=Math.sin(c.yaw),cy=Math.cos(c.yaw),g=c.g.col,dm=[g[0]*.12,g[1]*.12,g[2]*.12];
+    for(const c of chasers){if(!c.alive)continue;const sy=Math.sin(c.yaw),cy=Math.cos(c.yaw),g=gangCol(c.kind),dm=[g[0]*.12,g[1]*.12,g[2]*.12];
       put(c.x+.6*cy-.4*sy,c.y+1.1,c.z-.6*sy-.4*cy,fl?g:dm,3.2,-1);put(c.x-.6*cy-.4*sy,c.y+1.1,c.z+.6*sy-.4*cy,fl?dm:g,3.2,-1);
       put(c.x+sy*3.6,c.y,c.z+cy*3.6,[.5+g[0]*.5,.5+g[1]*.5,.5+g[2]*.5],2.2,-1,[sy,0,cy]);}
     for(const b of bursts){const k=1-b.t/.7;put(b.x,b.y,b.z,[1.6*k,.7*k,.2*k],10+b.t*46,0);put(b.x,b.y+1,b.z,[1*k,.9*k,.7*k],4+b.t*14,0);}
@@ -1975,8 +2108,13 @@ function fsPass(pr,dst,setup){gl.bindFramebuffer(gl.FRAMEBUFFER,dst?dst.f:null);
 function bindTex(unit,t,loc){gl.activeTexture(gl.TEXTURE0+unit);gl.bindTexture(gl.TEXTURE_2D,t);gl.uniform1i(loc,unit);}
 function blur(src,dst,dx,dy){fsPass(P.blur,dst,u=>{bindTex(0,src.t,u.uT);gl.uniform2f(u.uDir,dx/src.w,dy/src.h);});}
 
-const thEls=[...$('threats').children], mini=$('mini'), mctx=mini.getContext('2d');
-GANG.forEach((g,i)=>{thEls[i].style.color='rgb('+g.col.map(v=>Math.round(40+v*215)).join(',')+')';});
+var thReady=true;const thEls=[...$('threats').children], mini=$('mini'), mctx=mini.getContext('2d');
+const CB_GANG=[null,
+  [[1,.55,.05],[.35,.78,1],[1,.95,.25],[.95,.95,.95]],   // red-green
+  [[1,.55,.05],[.35,.78,1],[1,.95,.25],[.95,.95,.95]],
+  [[1,.2,.15],[.1,.85,.75],[1,.5,.8],[.95,.95,.95]]];     // blue-yellow
+const gangCol=i=>SET.cb?CB_GANG[SET.cb][i]:GANG[i].col;
+function paintThreats(){GANG.forEach((g,i)=>{thEls[i].style.color=cssCol(gangCol(i));});document.body.classList.toggle('cb',!!SET.cb);}
 function cssCol(c){return 'rgb('+c.map(v=>Math.round(40+v*215)).join(',')+')';}
 // an arrow on a ring around the screen for every Kuro cab within range: where it is, and how close
 function drawThreats(){
@@ -2006,7 +2144,7 @@ function drawMini(){
     [[E,E],[-E,E],[-E,-E],[E,-E]].forEach((c,i)=>{const q=raw(c[0],c[1]);i?g.lineTo(q[0],q[1]):g.moveTo(q[0],q[1]);});g.closePath();
     g.lineWidth=2;g.strokeStyle='rgba(255,150,50,.85)';g.stroke();g.restore(); }
   if(mode==='getaway')for(const c of chasers){if(!c.alive)continue;const q=plot(c.x,c.z);
-    const rr=q[2]?3:4.6+(c.dist<100?1.4+1.4*Math.sin(time*14):0);g.beginPath();g.arc(q[0],q[1],rr,0,6.2832);g.fillStyle=cssCol(c.g.col);g.shadowColor=g.fillStyle;g.shadowBlur=7;g.fill();g.shadowBlur=0;
+    const rr=q[2]?3:4.6+(c.dist<100?1.4+1.4*Math.sin(time*14):0);g.beginPath();g.arc(q[0],q[1],rr,0,6.2832);g.fillStyle=cssCol(gangCol(c.kind));g.shadowColor=g.fillStyle;g.shadowBlur=7;g.fill();g.shadowBlur=0;
     if(!q[2]){g.beginPath();g.arc(q[0],q[1],8,-1.5708,-1.5708+6.2832*Math.max(0,c.hp/c.g.hp));g.lineWidth=1.6;g.strokeStyle=g.fillStyle;g.stroke();}}
   g.beginPath();g.moveTo(S/2,S/2-7);g.lineTo(S/2+5,S/2+5);g.lineTo(S/2-5,S/2+5);g.closePath();g.fillStyle='#ffb23e';g.fill();
 }
@@ -2098,9 +2236,11 @@ function frame(now){
   requestAnimationFrame(frame);
   const rawDt=Math.min(1,(now-last)/1000);let dt=Math.min(.05,rawDt);last=now;
   fpsT+=rawDt;fpsF++;if(fpsT>=.5){const el=$('fps'),f=fpsF/fpsT,t=SET.fps?Math.round(f)+' FPS  '+(1000/f).toFixed(1)+' ms':'',cl=f>=55?'g':f>=30?'y':'r';if(el.textContent!==t)el.textContent=t;if(el.className!==cl)el.className=cl;fpsT=0;fpsF=0;}
+  if(bench){benchTick(rawDt);const gp=[...(navigator.getGamepads?navigator.getGamepads():[])].find(p=>p&&p.connected),b=!!(gp&&gp.buttons[1]&&gp.buttons[1].pressed);if(b&&!benchPadB&&bench)benchEnd(false);benchPadB=b;}
   resize();
   readInput();
   if(menuLock>0)menuLock-=rawDt;
+  captureTick();
   if(uiOpen())menuPad(dt);
   if(state!=='paused'){
     time+=dt;
@@ -2132,7 +2272,7 @@ function frame(now){
   } else for(const t of [T.a2,T.a4,T.a8]){gl.bindFramebuffer(gl.FRAMEBUFFER,t.f);gl.clearColor(0,0,0,1);gl.clear(gl.COLOR_BUFFER_BIT);}
   fsPass(P.post,null,u=>{bindTex(0,T.scene.t,u.uScene);bindTex(1,T.a2.t,u.uB2);bindTex(2,T.a4.t,u.uB4);bindTex(3,T.a8.t,u.uB8);
     gl.uniform1f(u.uTime,time);gl.uniform1f(u.uHit,hitFx);gl.uniform1f(u.uSpeed,car.speed);
-    gl.uniform1f(u.uLens,[0,.42,1][SET.lens]*(1-env.cover*.85));gl.uniform1f(u.uRush,env.rush*SET.blur);gl.uniform1f(u.uAsp,RW/RH);gl.uniform1f(u.uMist,.7+.4*env.gust);
+    gl.uniform1f(u.uGam,1-(SET.bright-5)*.07);gl.uniform1f(u.uLens,[0,.42,1][SET.lens]*(1-env.cover*.85));gl.uniform1f(u.uRush,env.rush*SET.blur);gl.uniform1f(u.uAsp,RW/RH);gl.uniform1f(u.uMist,.7+.4*env.gust);
     gl.uniform2f(u.uFlowA,flow.ax,flow.ay);gl.uniform2f(u.uFlowB,flow.bx,flow.by);gl.uniform2f(u.uFlowV,flow.vx,flow.vy);});
 
   // on Auto, step the render scale down once or twice if the machine is struggling
