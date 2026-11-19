@@ -227,7 +227,7 @@ table.hs tr.me .ini,table.hs tr.me .yen{color:var(--amber)}
 <script>
 "use strict";
 // The version shown in Options. The desktop app reads it from this line to decide whether an update is newer.
-const GAME_VERSION='10.16';
+const GAME_VERSION='10.18';
 // Present only inside the Windows / Steam Deck app (see desktop/preload.js): update, quit, fullscreen.
 const DESK=window.nrtDesktop||null;
 (function(){
@@ -1549,7 +1549,7 @@ function startGame(m,opt){
   initAudio();mode=m;state='play';closeMenus();HS.last=null;HS.lastTable=null;HS.status='';loadScores();
   Object.assign(car,{x:0,y:70,z:48,vx:0,vy:0,vz:0,yaw:0,yr:0,roll:0,pitch:0});
   Object.assign(cam,{x:0,y:74.2,z:35.5,lookYaw:0,lookPitch:0});
-  Object.assign(game,{total:0,rides:0,starsSum:0,hitCool:0,strikes:0,hinted:false,hull:100,wrecks:0,near:1e9,onTail:0,extreme:!!(opt&&opt.extreme),boost:100,boosting:false,boostTold:false,endReason:'',rideLeft:0,rideTotal:1});
+  Object.assign(game,{total:0,rides:0,starsSum:0,hitCool:0,strikes:0,hinted:false,hull:100,wrecks:0,near:1e9,onTail:0,extreme:!!(opt&&opt.extreme),boost:100,boosting:false,boostTold:false,boostHeld:true,endReason:'',rideLeft:0,rideTotal:1});
   game.shiftTime=game.extreme?90:100;
   resetChasers();sparks.length=0;trail.length=0;placeGarages(m==='getaway'&&game.extreme);$('fareClk').textContent='';
   $('hud').classList.add('on');$('totalYen').textContent='¥0';$('clock').textContent='';$('hull').textContent='';Object.assign(hp,{shown:100,lag:100,until:time+2.5,lt:time});
@@ -1647,7 +1647,7 @@ function toTitle(){
 }
 function togglePause(){
   if(state==='play'){state='paused';openRoot('pause');}
-  else if(state==='paused'){state='play';closeMenus();}
+  else if(state==='paused'){state='play';closeMenus();game.boostHeld=true;}
 }
 document.addEventListener('visibilitychange',()=>{if(document.hidden&&state==='play')togglePause();});
 
@@ -1728,7 +1728,8 @@ function updateCar(dt){
   let vf=car.vx*f[0]+car.vz*f[1], vl=car.vx*l[0]+car.vz*l[1];
   // in Rival Rush: Extreme boost burns fuel: about six and a half seconds from full, topped up a little by each fare
   const fuel=mode==='getaway'&&game.extreme;
-  game.boosting=inp.boost&&(!fuel||game.boost>0);
+  if(!inp.boost)game.boostHeld=false;
+  game.boosting=inp.boost&&!game.boostHeld&&(!fuel||game.boost>0);
   if(fuel&&game.boosting){game.boost=Math.max(0,game.boost-dt*15);if(game.boost<=0&&!game.boostTold){game.boostTold=true;toast('Out of boost. Deliver fares to earn more.',2.4);}}
   if(game.boost>0)game.boostTold=false;
   const maxS=game.boosting?108:68, acc=game.boosting?64:40, k=acc/maxS;
@@ -2165,12 +2166,12 @@ function drawHealth(){
   hb.querySelector('.fill').style.width=Math.max(0,game.hull)+'%';hb.querySelector('.lag').style.width=Math.max(0,hp.lag)+'%';
   hb.lastElementChild.textContent='Cab '+Math.max(0,Math.round(game.hull))+'%';
 }
-// boost rides under the health bar: shown while boosting, for a moment after it is refilled, and when it runs dry
+// boost rides under the health bar: shown whenever the amount changes (and for 2.5 s after), and when you try to boost on empty
 const bst={last:100,until:0};
 function drawBoost(){
   const b=$('bstBar');
   if(mode!=='getaway'||!game.extreme){b.style.opacity='0';return;}
-  if(game.boost>bst.last+.5){bst.until=time+2.5;}if(game.boosting||(game.boost<=0&&inp.boost))bst.until=Math.max(bst.until,time+1.2);bst.last=game.boost;
+  if(Math.abs(game.boost-bst.last)>.001||(game.boost<=0&&inp.boost))bst.until=time+2.5;bst.last=game.boost;   // any change, up or down, shows the bar
   const x=car.x,y=car.y+2.2,z=car.z,cw=VP[3]*x+VP[7]*y+VP[11]*z+VP[15];
   b.style.opacity=cw>0&&time<bst.until?'1':'0';if(cw<=0)return;
   const sx=((VP[0]*x+VP[4]*y+VP[8]*z+VP[12])/cw*.5+.5)*innerWidth,sy=(.5-(VP[1]*x+VP[5]*y+VP[9]*z+VP[13])/cw*.5)*innerHeight;
