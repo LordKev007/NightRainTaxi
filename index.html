@@ -144,6 +144,15 @@ h1{font-size:clamp(44px,6.4vw,84px);font-weight:700;margin:0;letter-spacing:-.02
 .xdense .item{font-size:17px;padding:4px 0 4px 18px}
 .item.sub>span:first-child{padding-left:20px;font-size:.88em;opacity:.85}
 .item.sub>span:first-child::before{content:'';display:inline-block;width:8px;height:1px;background:currentColor;opacity:.5;vertical-align:middle;margin:0 8px 0 -16px}
+#rfade{position:fixed;inset:0;background:#000;opacity:0;pointer-events:none;transition:opacity .25s;z-index:30}
+#rfade.on{opacity:1}
+#rpCap,#rpSkip{position:fixed;bottom:calc(7vh + 18px);opacity:0;transition:opacity .4s;pointer-events:none;text-shadow:0 0 12px #000,0 0 3px #000;z-index:20}
+#rpCap{left:7vw}#rpSkip{right:4vw;font-size:14px;opacity:0}
+#rpCap.on{opacity:1}#rpSkip.on{opacity:.75}
+#rpCap b{display:block;font-size:13px;letter-spacing:.22em;text-transform:uppercase;color:var(--amber);margin-bottom:4px}
+#rpCap span{font-size:clamp(22px,2.6vw,34px);font-weight:700}
+#rpSkip b{display:inline-block;border:1px solid rgba(255,255,255,.55);border-radius:4px;padding:1px 7px;margin-right:7px;font-weight:600}
+#rpSkip .gp{margin-right:7px}
 #bench{position:fixed;left:50%;bottom:9vh;transform:translateX(-50%);text-align:center;pointer-events:none;opacity:0;transition:opacity .3s;text-shadow:0 0 10px #000,0 0 3px #000}
 #bench.on{opacity:1}
 #bench b{display:block;font-size:30px;letter-spacing:.04em}
@@ -221,13 +230,14 @@ table.hs tr.me .ini,table.hs tr.me .yen{color:var(--amber)}
 </div>
 <div id="fade"></div>
 <div id="fps"></div>
+<div id="rfade"></div><div id="rpCap"></div><div id="rpSkip"></div>
 <div id="bench"><b></b><div class="trk"><i></i></div><small>Esc or B to stop</small></div>
 <div id="fatal"></div>
 
 <script>
 "use strict";
 // The version shown in Options. The desktop app reads it from this line to decide whether an update is newer.
-const GAME_VERSION='10.18';
+const GAME_VERSION='10.19';
 // Present only inside the Windows / Steam Deck app (see desktop/preload.js): update, quit, fullscreen.
 const DESK=window.nrtDesktop||null;
 (function(){
@@ -1078,7 +1088,7 @@ function initAudio(){
 }
 function updateAudio(){
   if(!A.ctx||A.ctx.state!=='running')return;
-  const t=A.ctx.currentTime,s=car.speed,on=state==='play'?1:.35,cv=env.cover,sp=Math.min(1,s/70),hov=clamp(1-s/40,0,1);
+  const t=A.ctx.currentTime,s=car.speed,on=state==='play'||state==='replay'?1:.35,cv=env.cover,sp=Math.min(1,s/70),hov=clamp(1-s/40,0,1);
   A.tick=(.2+.72*hov)*(1-cv);
   A.hissG.gain.setTargetAtTime((.05+.09*sp)*(1-.6*cv)*env.gust,t,.2);
   A.bodyG.gain.setTargetAtTime((.12+.14*env.open)*(1-.4*cv),t,.3);
@@ -1110,7 +1120,7 @@ function buildGangAudio(){
 }
 function updateGangAudio(t){
   if(!A.gang)buildGangAudio();
-  A.gang.forEach((n,i)=>{const c=chasers[i],on=state==='play'&&mode==='getaway'&&c&&c.alive;
+  A.gang.forEach((n,i)=>{const c=chasers[i],on=(state==='play'||state==='replay')&&mode==='getaway'&&c&&c.alive;
     if(!on){n.vol.gain.setTargetAtTime(0,t,.15);return;}
     const dx=c.x-cam.ex,dy=c.y-cam.ey,dz=c.z-cam.ez,d=Math.hypot(dx,dy,dz)||1,sp=Math.hypot(c.vx,c.vz);
     const rv=((c.vx-car.vx)*dx+(c.vz-car.vz)*dz)/d,pitch=n.base*(.8+sp/95)*clamp(1-rv/120,.75,1.3);
@@ -1191,6 +1201,7 @@ function captureTick(){
 function toggleFullscreen(){if(DESK){DESK.toggleFullscreen();return;}try{document.fullscreenElement?document.exitFullscreen():document.documentElement.requestFullscreen().catch(()=>{});}catch(_){}}
 addEventListener('keydown',e=>{
   if(bench){e.preventDefault();if(e.code==='Escape'||e.code==='Backspace')benchEnd(false);return;}
+  if(state==='replay'){e.preventDefault();if(['Enter','NumpadEnter','Space','Escape'].includes(e.code))endReplay();return;}
   if(capture){e.preventDefault();if(e.repeat)return;if(e.code==='Escape'){endCapture();return;}if(capture.a.padOnly){toast('Pause on the keyboard is always Esc or P',1.8);endCapture();return;}assignKey(capture.a,e.code);return;}
   if(e.code==='F3'){e.preventDefault();if(!e.repeat){SET.fps=SET.fps?0:1;saveSet();fpsT=.5;if(uiOpen())renderMenu();}return;}
   if(['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code))e.preventDefault();
@@ -1207,6 +1218,7 @@ addEventListener('keydown',e=>{
 addEventListener('keyup',e=>{keys[e.code]=false;});
 addEventListener('blur',()=>{for(const k in keys)keys[k]=false;});
 addEventListener('pointerdown',initAudio);
+addEventListener('pointerdown',()=>{if(state==='replay')endReplay();});
 // in fullscreen the mouse pointer hides after two seconds of stillness, and comes back as soon as the mouse moves
 let lastMouse=performance.now(),wasFs=false;
 addEventListener('mousemove',()=>{lastMouse=performance.now();document.body.classList.remove('nocursor');});
@@ -1551,7 +1563,7 @@ function startGame(m,opt){
   Object.assign(cam,{x:0,y:74.2,z:35.5,lookYaw:0,lookPitch:0});
   Object.assign(game,{total:0,rides:0,starsSum:0,hitCool:0,strikes:0,hinted:false,hull:100,wrecks:0,near:1e9,onTail:0,extreme:!!(opt&&opt.extreme),boost:100,boosting:false,boostTold:false,boostHeld:true,endReason:'',rideLeft:0,rideTotal:1});
   game.shiftTime=game.extreme?90:100;
-  resetChasers();sparks.length=0;trail.length=0;placeGarages(m==='getaway'&&game.extreme);$('fareClk').textContent='';
+  recReset();resetChasers();sparks.length=0;trail.length=0;placeGarages(m==='getaway'&&game.extreme);$('fareClk').textContent='';
   $('hud').classList.add('on');$('totalYen').textContent='¥0';$('clock').textContent='';$('hull').textContent='';Object.assign(hp,{shown:100,lag:100,until:time+2.5,lt:time});
   newJob();showStrikes();toast(m==='shift'?'Follow the diamond. Every fare is on the clock.':m==='getaway'?(game.extreme?'Extreme. The whole gang is coming. Good luck.':'Work fast. The Kuro cabs know you are on their turf.'):'No clock. Take fares if you feel like it.',3.5);
 }
@@ -1562,7 +1574,7 @@ let endT=0;
 function endShift(reason){if(state!=='play'&&state!=='paused')return;game.endReason=reason||'Shift over';closeMenus();
   if(state==='paused'){finishShift();return;}
   $('endBig').textContent=game.endReason;$('endSub').textContent=endWhy();
-  const wreck=game.endReason==='Cab wrecked';$('endBanner').className='on'+(wreck?' wreck':'');$('toast').classList.remove('on');
+  const wreck=game.endReason==='Cab wrecked';recEv('end',wreck?30:8,wreck?'Your cab wrecked':'The clock ran out');$('endBanner').className='on'+(wreck?' wreck':'');$('toast').classList.remove('on');
   if(wreck){bursts.push({x:car.x,y:car.y,z:car.z,t:0});spawnSparks(car.x,car.y,car.z,0,1,0,40);sfxThud(45);rumble(1,600);hitFx=1;shake=1.4*SET.shake;}
   else sfxChime([76,72,67,60]);
   state='ending';endT=performance.now()+2600;
@@ -1711,7 +1723,7 @@ function collideTraffic(dt){
       d=Math.hypot(dx,dy,dzz);
       if(d<1e-4){dx=0;dzz=0;dy=car.y>t.y?1:-1;d=1;rr=hy+2.3-Math.abs(car.y-t.y)+1;}
     } else {dx=car.x-tx;dy=car.y-t.y;dzz=car.z-tz;d=Math.hypot(dx,dy,dzz);rr=t.r+2.2;}
-    if(d>=rr&&d<rr+12&&rel>24&&time>(t.wh||0)&&state==='play'){t.wh=time+2.5;sfxWhoosh(clamp(-((tx-car.x)*Math.cos(car.yaw)-(tz-car.z)*Math.sin(car.yaw))/7,-1,1),Math.min(1,rel/90));}
+    if(d>=rr&&d<rr+12&&rel>24&&time>(t.wh||0)&&state==='play'){t.wh=time+2.5;recEv('near',(6+rel*.12)*(1.6-(d-rr)/12),'Near miss at '+Math.round(car.speed*3.6)+' km/h');sfxWhoosh(clamp(-((tx-car.x)*Math.cos(car.yaw)-(tz-car.z)*Math.sin(car.yaw))/7,-1,1),Math.min(1,rel/90));}
     if(d<rr){const nx=dx/(d||1),ny=dy/(d||1),nz=dzz/(d||1),pen=rr-d;
       car.x+=nx*pen;car.y+=ny*pen;car.z+=nz*pen;
       const vn=(car.vx-tvx)*nx+car.vy*ny+(car.vz-tvz)*nz;
@@ -1771,7 +1783,7 @@ function updateJob(dt){
       toast(j.who+' is in. '+Math.round(j.dist)+' m to go.'+(pickT?'  +'+pickT+' s':''));
     } else {
       const fare=800+j.dist*9,tip=game.rating*140,bonus=mode==='shift'&&SET.clocks?Math.floor(Math.max(0,game.jobTime))*25:0,total=fare+tip+bonus;
-      game.total+=total;game.rides++;game.starsSum+=game.rating;game.hull=Math.min(100,game.hull+(mode==='getaway'&&game.extreme?0:30));
+      recEv('fare',game.shiftTime<6?40:10,game.shiftTime<6?'Delivered with '+Math.max(0,Math.ceil(game.shiftTime))+' s to spare':'Fare delivered');game.total+=total;game.rides++;game.starsSum+=game.rating;game.hull=Math.min(100,game.hull+(mode==='getaway'&&game.extreme?0:30));
       // like Crazy Taxi: time is earned only by delivering quickly
       let rate='',addT=0;
       if(mode==='getaway'&&!game.extreme&&clk()){addT=Math.round(18+j.dist/45);game.shiftTime+=addT;}   // regular Rival Rush: the original time bonus
@@ -1858,7 +1870,7 @@ function gangTarget(c){
   if(c.kind===2){const k=chasers[0],ax=car.x+fx*1.6*C,az=car.z+fz*1.6*C,bx=k.alive?k.x:car.x-fx*200,bz=k.alive?k.z:car.z-fz*200;return [2*ax-bx,2*az-bz];}
   return c.flee?home:[car.x,car.z];
 }
-function wreck(c){c.alive=false;c.wait=8;bursts.push({x:c.x,y:c.y,z:c.z,t:0});game.total+=500;game.wrecks++;
+function wreck(c){recEv('wreck',100,c.g.name+' wrecked',c.x,c.y,c.z);c.alive=false;c.wait=8;bursts.push({x:c.x,y:c.y,z:c.z,t:0});game.total+=500;game.wrecks++;
   $('totalYen').textContent=yen(game.total);sfxThud(30);sfxChime([84,91]);toast(c.g.name+' wrecked +¥500',2);}
 function sfxAlert(){ if(!A.ctx)return; const c=A.ctx;for(let i=0;i<2;i++){const t=c.currentTime+i*.13,o=c.createOscillator(),g=c.createGain();o.type='triangle';o.frequency.setValueAtTime(620,t);o.frequency.exponentialRampToValueAtTime(410,t+.1);
   g.gain.setValueAtTime(.0001,t);g.gain.exponentialRampToValueAtTime(.12,t+.01);g.gain.exponentialRampToValueAtTime(.0005,t+.12);o.connect(g).connect(A.sfx);o.start(t);o.stop(t+.14);} }
@@ -1950,7 +1962,7 @@ function updateChase(dt){
       if(c.ramCool<=0){c.ramCool=1.8;c.vx*=.4;c.vy*=.4;c.vz*=.4;game.hull-=c.g.ram*dmgMul();onHit(c.g.ram*2.7,'ram');spawnSparks(car.x-nx*2.4,car.y-ny*2.4,car.z-nz*2.4,nx,ny,nz,14);
         if(c.kind===3){c.flee=true;c.direct=false;nearestNode(c);}
         if(game.hull<=0){game.hull=0;endShift('Cab wrecked');return;}
-        toast(c.g.name+' rammed you. Cab at '+Math.round(game.hull)+'%',1.6);}}
+        recEv('ram',10,c.g.name+' rammed you');toast(c.g.name+' rammed you. Cab at '+Math.round(game.hull)+'%',1.6);}}
     near=Math.min(near,dP);
   }
   // the cabs collide with each other: a nudge pushes them apart, a hard hit wrecks both
@@ -1986,6 +1998,128 @@ function fillChasers(){
   return n;
 }
 
+// ------------------------------------------------------------------ best moment replay (both Rival Rush modes)
+// While you drive, 30 times a second: where your cab and the four Kuro cabs are. Traffic, rain and neon are worked
+// out from the game clock, so rewinding the clock replays the whole city. When the shift ends the most exciting
+// ten seconds are picked and played back with movie cameras. A (or Enter, Esc, a click) skips.
+const RS=36,RMAX=36000,REC={rows:new Float32Array(RS*RMAX),n:0,last:-1,ev:[]};
+function recReset(){REC.n=0;REC.last=-1;REC.ev.length=0;REC.inTun=false;}
+function recEv(type,score,txt,x,y,z){if(mode!=='getaway'||state!=='play')return;REC.ev.push({t:time,type,score,txt,x:x??car.x,y:y??car.y,z:z??car.z});}
+function recTick(){
+  if(mode!=='getaway'||state!=='play'||time-REC.last<1/30)return;REC.last=time;
+  if(REC.n>=RMAX){REC.rows.copyWithin(0,(RMAX/2)*RS);REC.n=RMAX/2;}
+  let near=1e9,nk=0;for(const c of chasers){if(!c.alive)continue;const d=Math.hypot(c.x-car.x,c.y-car.y,c.z-car.z);if(d<near){near=d;nk=c.kind;}}
+  const r=REC.rows,o=REC.n*RS;
+  r[o]=time;r[o+1]=car.x;r[o+2]=car.y;r[o+3]=car.z;r[o+4]=car.yaw;r[o+5]=car.pitch;r[o+6]=car.roll;r[o+7]=car.speed;r[o+8]=car.vx;r[o+9]=car.vz;r[o+10]=car.vy;
+  r[o+11]=inp.throttle;r[o+12]=inp.brake;r[o+13]=game.boosting?1:0;r[o+14]=Math.min(near,999);r[o+15]=nk;
+  chasers.forEach((c,i)=>{const q=o+16+i*5;r[q]=c.alive?1:0;r[q+1]=c.x;r[q+2]=c.y;r[q+3]=c.z;r[q+4]=c.yaw;});
+  REC.n++;
+  // flying through the hole in a megablock at speed
+  let inT=false;for(const t of tunnels){const dx=Math.abs(car.x-t.x),dz=Math.abs(car.z-t.z);if(Math.abs(car.y-t.y)<14&&(t.alongX?dx<33&&dz<16:dz<33&&dx<16)){inT=true;break;}}
+  if(inT&&!REC.inTun&&car.speed>45)recEv('tunnel',22+car.speed*.15,'Through the tower at '+Math.round(car.speed*3.6)+' km/h');
+  REC.inTun=inT;
+}
+const angLerp=(a,b,k)=>{let d=b-a;while(d>Math.PI)d-=2*Math.PI;while(d<-Math.PI)d+=2*Math.PI;return a+d*k;};
+function recAt(t){   // interpolated pose at game time t
+  const r=REC.rows,n=REC.n;let lo=0,hi=n-1;
+  if(t<=r[0])hi=0;else if(t>=r[(n-1)*RS])lo=hi=n-1;else{while(hi-lo>1){const m=(lo+hi)>>1;if(r[m*RS]<=t)lo=m;else hi=m;}}
+  const a=lo*RS,b=hi*RS,span=r[b]-r[a],k=span>1e-6?(t-r[a])/span:0,L=i=>r[a+i]+(r[b+i]-r[a+i])*k;
+  const P={x:L(1),y:L(2),z:L(3),yaw:angLerp(r[a+4],r[b+4],k),pitch:L(5),roll:L(6),speed:L(7),vx:L(8),vz:L(9),vy:L(10),thr:L(11),brk:L(12),boost:r[a+13]>.5,near:L(14),nk:r[a+15],ch:[]};
+  for(let i=0;i<4;i++){const q=16+i*5;P.ch.push({alive:r[a+q]>.5&&r[b+q]>.5,x:L(q+1),y:L(q+2),z:L(q+3),yaw:angLerp(r[a+q+4],r[b+q+4],k)});}
+  return P;
+}
+function pickMoment(){
+  const n=REC.n,r=REC.rows,W=10;if(n<30)return null;
+  const T0=r[0],T1=r[(n-1)*RS],cum=new Float64Array(n+1);
+  for(let i=0;i<n;i++){const o=i*RS,dt=i?r[o]-r[o-RS]:0,sp=r[o+7],nr=r[o+14];
+    cum[i+1]=cum[i]+dt*(Math.max(0,(sp-55)/40)*1.4+(nr<32?(32-nr)/32*3.2:0)+(r[o+13]?.4:0));}
+  const idx=t=>{let lo=0,hi=n;while(lo<hi){const m=(lo+hi)>>1;if(r[m*RS]<t)lo=m+1;else hi=m;}return lo;};
+  let best=null;
+  for(let t0=T0;t0<=Math.max(T0,T1-W)+1e-6;t0+=.5){
+    let sc=cum[idx(t0+W)]-cum[idx(t0)],top=null;
+    for(const e of REC.ev)if(e.t>=t0+1.2&&e.t<=t0+W-1.2){sc+=e.score;if(!top||e.score>top.score)top=e;}
+    if(!best||sc>best.sc)best={t0,t1:Math.min(T1,t0+W),sc,top};
+  }
+  return best;
+}
+function captionFor(m){
+  if(m.top)return m.top.txt;
+  const P=recAt((m.t0+m.t1)/2);
+  if(P.near<40)return GANG[P.nk].name+' right on your tail';
+  let top=0;for(let i=0;i<REC.n;i++){const o=i*RS;if(REC.rows[o]>=m.t0&&REC.rows[o]<=m.t1)top=Math.max(top,REC.rows[o+7]);}
+  return 'Top speed '+Math.round(top*3.6)+' km/h';
+}
+let RP=null;
+const clearView=(ax,ay,az,bx,by,bz)=>{for(let s=1;s<8;s++){const t=s/8;if(insideSolid(lerp(ax,bx,t),lerp(ay,by,t),lerp(az,bz,t),.8))return false;}return !insideSolid(bx,by,bz,1.2);};
+function planShots(m){
+  const shots=[],tp=m.top?m.top.t:(m.t0+m.t1)/2,order=['chase','side','gang','front','chase','side'];let t=m.t0,k=0;
+  while(t<m.t1-.05){let len=2.6+Math.random()*1.2;
+    let type=order[k%order.length];
+    if(tp>=t&&tp<t+len)type=m.top&&m.top.type==='wreck'?'gang':'street';   // the big moment gets the best seat
+    const sh={type,t,len:Math.min(len,m.t1-t),side:Math.random()<.5?-1:1};
+    if(type==='street'){   // a camera planted beside the path, which the cab screams past
+      const P=recAt(Math.min(m.t1,tp+.5)),rx=Math.cos(P.yaw),rz=-Math.sin(P.yaw);let ok=false;
+      for(const sd of [sh.side,-sh.side])for(const dist of [11,7]){const x=P.x+rx*sd*dist,y=P.y+1.5,z=P.z+rz*sd*dist;
+        if(!ok&&clearView(P.x,P.y+1,P.z,x,y,z)){sh.p=[x,y,z];ok=true;}}
+      if(!ok)sh.type='chase';}
+    if(sh.type==='gang'){const P=recAt(t);let bi=-1,bd=140;P.ch.forEach((c,i)=>{if(!c.alive)return;const d=Math.hypot(c.x-P.x,c.z-P.z);if(d<bd){bd=d;bi=i;}});
+      if(bi<0)sh.type=type==='gang'&&tp>=t&&tp<t+len?'street':'side';else sh.who=bi;
+      if(sh.type==='street'){const P2=recAt(Math.min(m.t1,tp+.5)),rx=Math.cos(P2.yaw),rz=-Math.sin(P2.yaw),x=P2.x+rx*sh.side*11,y=P2.y+1.5,z=P2.z+rz*sh.side*11;
+        if(clearView(P2.x,P2.y+1,P2.z,x,y,z))sh.p=[x,y,z];else sh.type='chase';}}
+    shots.push(sh);t+=sh.len;k++;}
+  return shots;
+}
+function startReplay(){
+  const m=pickMoment();if(!m){finishShift();return;}
+  $('endBanner').classList.remove('on');$('hud').classList.remove('on');$('toast').classList.remove('on');
+  RP={m,shots:planShots(m),rt:0,lastT:m.t0,endT:time,phase:'in',fade:0,save:{x:car.x,y:car.y,z:car.z,yaw:car.yaw,pitch:car.pitch,roll:car.roll,vx:car.vx,vy:car.vy,vz:car.vz},chs:chasers.map(c=>({alive:c.alive,x:c.x,y:c.y,z:c.z,yaw:c.yaw}))};
+  sparks.length=0;bursts.length=0;trail.length=0;shake=0;hitFx=0;
+  state='replay';$('bars').classList.add('on');
+  $('rpCap').innerHTML='<b>Best moment</b><span>'+captionFor(m)+'</span>';$('rpSkip').innerHTML=(lastDev==='pad'?gpBtn(0):'<b>Enter</b>')+'Skip';
+  $('rpCap').classList.add('on');$('rpSkip').classList.add('on');$('rfade').classList.add('on');setTimeout(()=>$('rfade').classList.remove('on'),260);
+  replayPose(m.t0);
+}
+function replayPose(t){
+  const P=recAt(t);time=t;
+  Object.assign(car,{x:P.x,y:P.y,z:P.z,yaw:P.yaw,pitch:P.pitch,roll:P.roll,speed:P.speed,vx:P.vx,vz:P.vz,vy:P.vy});
+  inp.throttle=P.thr;inp.brake=P.brk;game.boosting=P.boost;
+  P.ch.forEach((q,i)=>{const c=chasers[i];if(!c)return;c.alive=q.alive;c.x=q.x;c.y=q.y;c.z=q.z;c.yaw=q.yaw;});
+  return P;
+}
+function replayTick(rawDt){
+  if(!RP||RP.phase==='out')return;
+  RP.rt+=Math.min(rawDt,.1);const t=Math.min(RP.m.t1,RP.m.t0+RP.rt);
+  replayPose(t);
+  for(const e of REC.ev)if(e.t>RP.lastT&&e.t<=t){   // replay the events as they happen
+    if(e.type==='wreck'||(e.type==='end'&&/wrecked/.test(e.txt))){bursts.push({x:e.x,y:e.y,z:e.z,t:0});spawnSparks(e.x,e.y,e.z,0,1,0,30);sfxThud(34);}
+    else if(e.type==='ram'){spawnSparks(e.x,e.y,e.z,0,1,0,12);sfxThud(18);}
+    else if(e.type==='near')sfxWhoosh(0,.9);
+    else if(e.type==='fare')sfxChime([76,81]);}
+  RP.lastT=t;
+  for(let i=bursts.length-1;i>=0;i--){bursts[i].t+=Math.min(rawDt,.1);if(bursts[i].t>.7)bursts.splice(i,1);}
+  if(t>=RP.m.t1)endReplay();
+}
+function endReplay(){
+  if(!RP||RP.phase==='out')return;RP.phase='out';$('rfade').classList.add('on');
+  setTimeout(()=>{const sv=RP.save;Object.assign(car,sv);RP.chs.forEach((q,i)=>{if(chasers[i])Object.assign(chasers[i],q);});car.speed=Math.hypot(sv.vx,sv.vz);time=RP.endT;RP=null;sparks.length=0;bursts.length=0;
+    $('rpCap').classList.remove('on');$('rpSkip').classList.remove('on');$('bars').classList.remove('on');finishShift();
+    setTimeout(()=>$('rfade').classList.remove('on'),60);},260);
+}
+function replayCamera(){   // returns [ex,ey,ez,tx,ty,tz,fov]
+  const t=RP?Math.min(RP.m.t1,RP.m.t0+RP.rt):time;
+  const sh=(RP&&RP.shots.find(s=>t>=s.t&&t<s.t+s.len+1e-3))||(RP&&RP.shots[RP.shots.length-1])||{type:'chase',side:1};
+  const fx=Math.sin(car.yaw),fz=Math.cos(car.yaw),rx=Math.cos(car.yaw),rz=-Math.sin(car.yaw),u=(t-sh.t)/Math.max(.1,sh.len);
+  let e,look=[car.x+fx*3,car.y+.8,car.z+fz*3],fov=1.08;
+  const pull=(w)=>{let tb=1;for(let s=1;s<=8;s++){const k=s/8;if(insideSolid(lerp(car.x,w[0],k),lerp(car.y+1.2,w[1],k),lerp(car.z,w[2],k),1.2)){tb=Math.max(.15,(s-1)/8);break;}}
+    return [lerp(car.x,w[0],tb),lerp(car.y+1.2,w[1],tb),lerp(car.z,w[2],tb)];};
+  if(sh.type==='street'&&sh.p){e=sh.p;look=[car.x,car.y+.6,car.z];fov=.82;}
+  else if(sh.type==='side'){e=pull([car.x+rx*sh.side*12-fx*(4-u*6),car.y+1.2,car.z+rz*sh.side*12-fz*(4-u*6)]);fov=.95;}
+  else if(sh.type==='front'){e=pull([car.x+fx*17+rx*sh.side*3,car.y+2.2,car.z+fz*17+rz*sh.side*3]);look=[car.x,car.y+.6,car.z];fov=.95;}
+  else if(sh.type==='gang'&&chasers[sh.who]&&chasers[sh.who].alive){const c=chasers[sh.who],cf=[Math.sin(c.yaw),Math.cos(c.yaw)];
+    e=[c.x-cf[0]*10,c.y+3.4,c.z-cf[1]*10];if(insideSolid(e[0],e[1],e[2],1))e=[c.x,c.y+3,c.z];look=[car.x,car.y+.8,car.z];fov=1.0;}
+  else {e=pull([car.x-fx*15,car.y+4.5,car.z-fz*15]);fov=1.12;}
+  return [e[0],e[1],e[2],look[0],look[1],look[2],fov];
+}
 // ------------------------------------------------------------------ frame
 let VP=IDENT, camF=[0,0,1], camR=[1,0,0], camU=[0,1,0], tanY=1, asp=1;
 function updateCamera(dt){
@@ -1995,6 +2129,8 @@ function updateCamera(dt){
     const t=(performance.now()-bench.t0)/1000,bx=-HALF+Math.round(N/2)*C;
     ex=bx+Math.sin(t*.5)*5;ey=48+Math.sin(t*.8)*7;ez=-220+t*52;tx=bx+Math.sin(t*.5+.7)*9;ty=ey-7;tz=ez+70;
     cam.x=ex;cam.y=ey;cam.z=ez;
+  } else if(state==='replay'){
+    const c=replayCamera();ex=c[0];ey=c[1];ez=c[2];tx=c[3];ty=c[4];tz=c[5];cam.x=ex;cam.y=ey;cam.z=ez;cam.fov=c[6];
   } else if(state==='menu'||state==='over'){
     const a=time*.07;ex=car.x+Math.sin(a)*11;ez=car.z+Math.cos(a)*11;ey=car.y+2.2+Math.sin(time*.13)*1.6;
     const ddx=car.x-ex,ddz=car.z-ez,dl=Math.hypot(ddx,ddz)||1;   // aim left of the cab so it sits clear of the menu
@@ -2012,7 +2148,7 @@ function updateCamera(dt){
     const la=Math.abs(cam.lookYaw)>.2?0:9;tx=car.x+f[0]*la;ty=car.y+1.2+car.vy*.05;tz=car.z+f[2]*la;
   }
   if(shake>0&&SET.shake){ex+=(Math.random()-.5)*shake;ey+=(Math.random()-.5)*shake;ez+=(Math.random()-.5)*shake;}
-  const fovT=1.02+Math.min(.42,car.speed*.0042)+env.rush*.1;cam.fov+=(fovT-cam.fov)*Math.min(1,dt*4);
+  if(state!=='replay'){const fovT=1.02+Math.min(.42,car.speed*.0042)+env.rush*.1;cam.fov+=(fovT-cam.fov)*Math.min(1,dt*4);}
   camF=norm([tx-ex,ty-ey,tz-ez]);let r=norm(cross(camF,[0,1,0])),u=cross(r,camF);
   const roll=state==='play'?-car.roll*.22:0,cr=Math.cos(roll),sr=Math.sin(roll);
   camR=[r[0]*cr+u[0]*sr,r[1]*cr+u[1]*sr,r[2]*cr+u[2]*sr];camU=[u[0]*cr-r[0]*sr,u[1]*cr-r[1]*sr,u[2]*cr-r[2]*sr];
@@ -2046,7 +2182,7 @@ function fillDynamic(){
   for(const s of sparks){const k=1-s.t/s.life;put(s.x,s.y,s.z,[1.8*k,1.0*k,.35*k],.42,0);}
   // garages: a green square on the street with lights chasing round it, and a cross in the middle
   nPads=0;
-  if(mode==='getaway')for(const g of garages){if(g.used)continue;const L=g.fl;
+  if(mode==='getaway'&&state!=='replay')for(const g of garages){if(g.used)continue;const L=g.fl;
     for(let k=0;k<32;k++){const t=k/32*4,sd=Math.floor(t),f=t-sd,a=-9+18*f,px=[a,9,-a,-9][sd],pz=[-9,a,9,-a][sd];put(g.x+px,g.y+.7,g.z+pz,[.15*L,1.2*L,.45*L],1.3,.02+k/32*.96);}
     if(g.tun)padData.set([g.x,g.y,g.z,L],4*nPads++);
     }
@@ -2078,7 +2214,7 @@ function renderScene(mirror,nDyn,model,H,nCh){
   gl.bindVertexArray(emptyVAO);gl.drawArrays(gl.TRIANGLES,0,3);
   gl.enable(gl.DEPTH_TEST);gl.depthMask(true);gl.disable(gl.CULL_FACE);
   if(mirror>0){u=common(P.ground,1);gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,T.refl.t);gl.uniform1i(u.uRefl,0);gl.uniform2f(u.uRes,RW,RH);
-    for(let i=0;i<GAR_MAX;i++){const g=garages[i],on=mode==='getaway'&&g&&!g.used&&!g.tun;GAR_U[i*4]=g?g.x:0;GAR_U[i*4+1]=g?g.z:0;GAR_U[i*4+2]=on?1:0;GAR_U[i*4+3]=g?g.fl:1;}
+    for(let i=0;i<GAR_MAX;i++){const g=garages[i],on=mode==='getaway'&&state!=='replay'&&g&&!g.used&&!g.tun;GAR_U[i*4]=g?g.x:0;GAR_U[i*4+1]=g?g.z:0;GAR_U[i*4+2]=on?1:0;GAR_U[i*4+3]=g?g.fl:1;}
     if(u['uGar[0]'])gl.uniform4fv(u['uGar[0]'],GAR_U);
     gl.bindVertexArray(groundVAO);gl.drawArrays(gl.TRIANGLE_STRIP,0,4);}
   gl.enable(gl.CULL_FACE);gl.frontFace(mirror>0?gl.CCW:gl.CW);
@@ -2218,7 +2354,7 @@ function updateEnv(dt){
   wind.x=6+9*Math.sin(time*.13)+5*Math.sin(time*.37+1);wind.z=2+7*Math.sin(time*.11+2);wind.dx+=wind.x*dt;wind.dz+=wind.z*dt;
   env.gust=clamp(.85+.3*Math.sin(time*.21)+.2*Math.sin(time*.53+2),.5,1.35);
   env.rainAmt=env.gust*(1-env.cover*.9);
-  env.rush+=(((state==='play'&&game.boosting&&car.speed>62)?1:0)-env.rush)*Math.min(1,dt*3.5);
+  env.rush+=((((state==='play'||state==='replay')&&game.boosting&&car.speed>62)?1:0)-env.rush)*Math.min(1,dt*3.5);
   // which way the water on the lens is being pushed: turning and sliding throw it sideways, climbing and diving up or down
   const vl=car.vx*Math.cos(car.yaw)-car.vz*Math.sin(car.yaw);
   const tfx=clamp(car.yr*.22+vl*.012,-1,1),tfy=clamp(-.09-car.vy*.012,-.6,.5),fk=Math.min(1,dt*5);
@@ -2227,7 +2363,7 @@ function updateEnv(dt){
 }
 function updateFx(dt){
   for(let i=sparks.length-1;i>=0;i--){const s=sparks[i];s.t+=dt;if(s.t>s.life){sparks.splice(i,1);continue;}s.vy-=32*dt;s.x+=s.vx*dt;s.y+=s.vy*dt;s.z+=s.vz*dt;}
-  if(state==='play'){const fx=Math.sin(car.yaw),fz=Math.cos(car.yaw),lx=Math.cos(car.yaw),lz=-Math.sin(car.yaw);
+  if(state==='play'||state==='replay'){const fx=Math.sin(car.yaw),fz=Math.cos(car.yaw),lx=Math.cos(car.yaw),lz=-Math.sin(car.yaw);
     trail.unshift([car.x-fx*2.75+lx*.8,car.y+.06,car.z-fz*2.75+lz*.8,car.x-fx*2.75-lx*.8,car.y+.06,car.z-fz*2.75-lz*.8,car.speed,env.rush>.4?1:0]);
     if(trail.length>22)trail.pop();}
   else if(trail.length)trail.length=0;
@@ -2245,15 +2381,17 @@ function frame(now){
   if(uiOpen())menuPad(dt);
   if(state!=='paused'){
     time+=dt;
-    if(state==='play'){updateCar(dt);updateJob(dt);if(state==='play'&&mode==='getaway')updateChase(dt);}
+    if(state==='play'){updateCar(dt);updateJob(dt);if(state==='play'&&mode==='getaway')updateChase(dt);recTick();}
+    else if(state==='replay'){}
     else {car.vx*=.95;car.vz*=.95;car.vy*=.9;car.speed=Math.hypot(car.vx,car.vz);car.roll*=.95;car.pitch*=.95;}
     updateEnv(dt);updateFx(dt);
-    if(state==='ending'&&performance.now()>=endT)finishShift();
+    if(state==='ending'&&performance.now()>=endT){if(mode==='getaway')startReplay();else finishShift();}
     if(time>nextBolt){const bd=Math.random();flash=lerp(1,.3,bd);nextBolt=time+9+Math.random()*24;sfxThunder(bd);}
     flash=flash>0.02?flash*Math.exp(-dt*(4+6*Math.sin(time*31)*Math.sin(time*31))):0;
     shake=Math.max(shake-dt*3,env.rush*.07);hitFx=Math.max(0,hitFx-dt*2.2);
     if(toastT>0){toastT-=dt;if(toastT<=0)$('toast').classList.remove('on');}
   }
+  if(state==='replay'){replayTick(rawDt);if(RP&&(padEdge[0]||padEdge[9]))endReplay();}
   updateCamera(dt);
   if(state==='play')updateHud();
   updateAudio();
@@ -2287,7 +2425,7 @@ setLamp('空車','Vacant','');
 openRoot('main');
 loadScores();
 setTimeout(()=>$('fade').classList.add('out'),350);
-window.__nrt={garages,HS,car,game,cam,pads,traffic,tunnels,env,SET,sparks,flow,get scatter(){return scatterT;},menuKey:c=>menuKey({code:c,repeat:false,preventDefault(){}}),get menu(){return menuStack.slice();},get sel(){return sel;},togglePause,get time(){return time;},snap(){cam.x=car.x-Math.sin(car.yaw)*12.5;cam.y=car.y+4.2;cam.z=car.z-Math.cos(car.yaw)*12.5;},startGame,endShift,step(n){for(let i=0;i<n;i++){readInput();time+=1/60;if(state==='play'){updateCar(1/60);updateJob(1/60);if(state==='play'&&mode==='getaway')updateChase(1/60);}updateEnv(1/60);updateFx(1/60);}},chasers,vents:steamI.filter((v,i)=>i%48<3),get state(){return state;},stats:{instCount,signCount,ptCount,rCount,pads:pads.length,traffic:traffic.length}};
+window.__nrt={REC,get RP(){return RP;},pickMoment,garages,HS,car,game,cam,pads,traffic,tunnels,env,SET,sparks,flow,get scatter(){return scatterT;},menuKey:c=>menuKey({code:c,repeat:false,preventDefault(){}}),get menu(){return menuStack.slice();},get sel(){return sel;},togglePause,get time(){return time;},snap(){cam.x=car.x-Math.sin(car.yaw)*12.5;cam.y=car.y+4.2;cam.z=car.z-Math.cos(car.yaw)*12.5;},startGame,endShift,step(n){for(let i=0;i<n;i++){readInput();time+=1/60;if(state==='play'){updateCar(1/60);updateJob(1/60);if(state==='play'&&mode==='getaway')updateChase(1/60);recTick();}updateEnv(1/60);updateFx(1/60);}},chasers,vents:steamI.filter((v,i)=>i%48<3),get state(){return state;},stats:{instCount,signCount,ptCount,rCount,pads:pads.length,traffic:traffic.length}};
 requestAnimationFrame(frame);
 })();
 </script>
