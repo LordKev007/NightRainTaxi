@@ -125,13 +125,15 @@ h1{font-size:clamp(44px,6.4vw,84px);font-weight:700;margin:0;letter-spacing:-.02
 #ui:not([data-menu="main"]) #logo{display:none}
 .item{appearance:none;background:none;border:0;border-left:3px solid transparent;font:inherit;text-align:left;width:100%;
   display:flex;align-items:center;justify-content:space-between;gap:20px;font-size:23px;font-weight:600;padding:9px 0 9px 18px;
-  color:rgba(233,242,245,.58);cursor:pointer;transition:padding .12s,color .12s}
-.item.sel{color:#fff;border-left-color:var(--amber);padding-left:28px;text-shadow:0 0 18px rgba(255,178,62,.5)}
+  color:rgba(233,242,245,.58);cursor:pointer;transition:color .12s}
+.item>span:first-child{transition:transform .12s}
+.item.sel>span:first-child{transform:translateX(10px)}
+.item.sel{color:#fff;border-left-color:var(--amber);text-shadow:0 0 18px rgba(255,178,62,.5)}
 .item:focus-visible{outline:2px solid #fff;outline-offset:2px}
 .item .val{font-size:17px;font-weight:400;color:var(--amber);white-space:nowrap;font-variant-numeric:tabular-nums}
 .bar{display:inline-block;width:120px;height:4px;margin-right:12px;background:rgba(255,255,255,.18);vertical-align:middle;border-radius:2px;overflow:hidden}
 .bar i{display:block;height:100%;background:var(--amber)}
-#uiHint{min-height:44px;margin:14px 0 0 21px;font-size:15px;line-height:1.45;opacity:.72;max-width:46ch}
+#uiHint{height:5.8em;overflow:hidden;margin:14px 0 0 21px;font-size:15px;line-height:1.45;opacity:.72;max-width:46ch}
 #uiPane{margin:0 0 2vh 21px}
 #uiPane table{border-collapse:collapse;font-size:16px;line-height:1.3}
 #uiPane th{font-weight:600;text-align:left;padding:0 26px 8px 0;color:var(--cyan)}
@@ -139,9 +141,7 @@ h1{font-size:clamp(44px,6.4vw,84px);font-weight:700;margin:0;letter-spacing:-.02
 #uiPane td:first-child{opacity:.6}
 #uiKeys{margin:14px 0 0 21px;font-size:13px;opacity:.62;min-height:22px}
 .dense .item{font-size:20px;padding:6px 0 6px 18px}
-.dense .item.sel{padding-left:28px}
 .xdense .item{font-size:17px;padding:4px 0 4px 18px}
-.xdense .item.sel{padding-left:26px}
 .item.sub>span:first-child{padding-left:20px;font-size:.88em;opacity:.85}
 .item.sub>span:first-child::before{content:'';display:inline-block;width:8px;height:1px;background:currentColor;opacity:.5;vertical-align:middle;margin:0 8px 0 -16px}
 #bench{position:fixed;left:50%;bottom:9vh;transform:translateX(-50%);text-align:center;pointer-events:none;opacity:0;transition:opacity .3s;text-shadow:0 0 10px #000,0 0 3px #000}
@@ -150,7 +150,7 @@ h1{font-size:clamp(44px,6.4vw,84px);font-weight:700;margin:0;letter-spacing:-.02
 #bench .trk{width:320px;height:4px;margin:10px auto 6px;background:rgba(255,255,255,.18);border-radius:2px;overflow:hidden}
 #bench .trk i{display:block;height:100%;background:var(--amber)}
 #bench small{opacity:.75}
-.dense #uiHint{min-height:24px;margin-top:10px}
+.dense #uiHint{margin-top:10px}
 #uiKeys b{display:inline-block;border:1px solid rgba(255,255,255,.55);border-radius:4px;padding:1px 7px;margin:0 7px 0 18px;font-weight:600}
 #uiKeys b:first-child{margin-left:0}
 #uiKeys .gp{margin:0 7px 0 18px}
@@ -227,7 +227,7 @@ table.hs tr.me .ini,table.hs tr.me .yen{color:var(--amber)}
 <script>
 "use strict";
 // The version shown in Options. The desktop app reads it from this line to decide whether an update is newer.
-const GAME_VERSION='10.15';
+const GAME_VERSION='10.16';
 // Present only inside the Windows / Steam Deck app (see desktop/preload.js): update, quit, fullscreen.
 const DESK=window.nrtDesktop||null;
 (function(){
