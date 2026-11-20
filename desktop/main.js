@@ -1,112 +1,104 @@
 // Night Rain Taxi desktop app (Windows and Steam Deck).
 //
-// The game itself is the single index.html. A copy is bundled inside the app so it always
-// works offline. When asked, the app checks the GitHub Pages site for a newer index.html,
-// saves it in the app's own data folder, and from then on starts whichever copy is newer.
+// The game itself is the single index.html, bundled inside the app. The app never downloads or runs
+// any other game file: updates come from installing a new release (and, later, from Steam).
+//
+// Security setup, following Electron's security checklist:
+//  - the Chromium sandbox stays on everywhere, including Linux and Steam Deck
+//  - the game page has no Node access, runs in its own isolated world, and talks to the app only
+//    through the four calls in preload.js, which accept calls only from the bundled game file
+//  - the page can't navigate, open windows, open outside links, or get camera, microphone,
+//    location or other permissions
 
-const { app, BrowserWindow, ipcMain, net, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, session } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const { fileURLToPath } = require('url');
 
-const SITE = 'https://lordkev007.github.io/NightRainTaxi/';
-
-// AppImages on SteamOS cannot use Chromium's setuid sandbox, and the app only ever runs
-// its own game file, so the sandbox is switched off on Linux.
-if (process.platform === 'linux') app.commandLine.appendSwitch('no-sandbox');
+app.enableSandbox();
 app.commandLine.appendSwitch('ignore-gpu-blocklist');
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
-const bundledFile = path.join(__dirname, 'game', 'index.html');
-const savedFile = () => path.join(app.getPath('userData'), 'game', 'index.html');
+const gameFile = path.join(__dirname, 'game', 'index.html');
 
 function versionOf(html) {
   const m = /const GAME_VERSION='([0-9.]+)'/.exec(html || '');
   return m ? m[1] : '0';
 }
-function compare(a, b) {
-  const x = a.split('.').map(Number), y = b.split('.').map(Number);
-  for (let i = 0; i < Math.max(x.length, y.length); i++) {
-    const d = (x[i] || 0) - (y[i] || 0);
-    if (d) return d;
-  }
-  return 0;
-}
-function readOrEmpty(file) {
-  try { return fs.readFileSync(file, 'utf8'); } catch { return ''; }
-}
-// whichever copy of the game is newer: the one shipped with the app, or a downloaded update
-function currentGame() {
-  const bundled = readOrEmpty(bundledFile), saved = readOrEmpty(savedFile());
-  if (saved && compare(versionOf(saved), versionOf(bundled)) > 0) return { file: savedFile(), version: versionOf(saved) };
-  return { file: bundledFile, version: versionOf(bundled) };
-}
+let gameVersion = '0';
+try { gameVersion = versionOf(fs.readFileSync(gameFile, 'utf8')); } catch {}
 
 function isSteamDeck() {
   return process.env.SteamDeck === '1' || /valve|neptune/i.test(os.release());
 }
 
+// Older versions of the app could download game updates into the app's data folder.
+// That copy is never used now, so it is removed.
+function removeOldDownloadedGame() {
+  try { fs.rmSync(path.join(app.getPath('userData'), 'game'), { recursive: true, force: true }); } catch {}
+}
+
 let win = null;
-let fetched = null;   // the newest game file found online, held until the player chooses to update
+
+// Only the main frame of the game window, showing the bundled game file, may call the app.
+function isGameFile(url) {
+  try {
+    const u = new URL(url);
+    if (u.protocol !== 'file:' || u.search || u.hash) return false;
+    const a = path.resolve(fileURLToPath(u)), b = path.resolve(gameFile);
+    return process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
+  } catch { return false; }
+}
+function fromGame(event) {
+  const f = event.senderFrame;
+  return !!(win && f && event.sender === win.webContents && f === win.webContents.mainFrame && isGameFile(f.url));
+}
 
 function createWindow() {
   win = new BrowserWindow({
     width: 1280, height: 800, fullscreen: true, show: false,
     backgroundColor: '#04060b', autoHideMenuBar: true, title: 'Night Rain Taxi',
     icon: path.join(__dirname, 'build', 'icon.png'),
-    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true },
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true,
+      spellcheck: false,
+    },
   });
   win.setMenu(null);
-  win.loadFile(currentGame().file);
-  win.once('ready-to-show', () => win.show());
-  // links open in the normal web browser; the game window never navigates away
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https:\/\//.test(url)) shell.openExternal(url);
-    return { action: 'deny' };
-  });
+  // no outside pages: block navigation, new windows and every other link
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', (e) => e.preventDefault());
+  win.webContents.on('will-redirect', (e) => e.preventDefault());
+  win.webContents.on('will-attach-webview', (e) => e.preventDefault());
+  win.loadFile(gameFile);
+  win.once('ready-to-show', () => win.show());
 }
 
-async function fetchLatest() {
-  const res = await net.fetch(SITE + 'index.html?t=' + Date.now(), { cache: 'no-store' });
-  if (!res.ok) throw new Error('GitHub answered ' + res.status);
-  const html = await res.text();
-  if (!html.includes('id="gl"') || versionOf(html) === '0') throw new Error('the file online does not look like the game');
-  return html;
-}
-
-ipcMain.handle('nrt:info', () => ({
-  appVersion: app.getVersion(), gameVersion: currentGame().version,
-  platform: process.platform, deck: isSteamDeck(),
-}));
-
-ipcMain.handle('nrt:check', async () => {
-  try {
-    const html = await fetchLatest();
-    const latest = versionOf(html), newer = compare(latest, currentGame().version) > 0;
-    fetched = newer ? html : null;
-    return { newer, latest };
-  } catch (e) {
-    return { newer: false, error: String(e.message || e) };
-  }
+ipcMain.handle('nrt:info', (e) => {
+  if (!fromGame(e)) return null;
+  return { appVersion: app.getVersion(), gameVersion, platform: process.platform, deck: isSteamDeck() };
 });
+ipcMain.handle('nrt:quit', (e) => { if (fromGame(e)) app.quit(); });
+ipcMain.handle('nrt:fullscreen', (e) => { if (fromGame(e) && win) win.setFullScreen(!win.isFullScreen()); });
 
-ipcMain.handle('nrt:update', async () => {
-  try {
-    const html = fetched || await fetchLatest();
-    if (compare(versionOf(html), currentGame().version) <= 0) return { ok: false, error: 'already up to date' };
-    fs.mkdirSync(path.dirname(savedFile()), { recursive: true });
-    fs.writeFileSync(savedFile(), html, 'utf8');
-    fetched = null;
-    setTimeout(() => win && win.loadFile(currentGame().file), 300);
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, error: String(e.message || e) };
-  }
+app.whenReady().then(() => {
+  // deny every permission request (camera, microphone, location, notifications, MIDI...)
+  // except fullscreen, which the game may ask for itself
+  const allowed = (permission) => permission === 'fullscreen';
+  session.defaultSession.setPermissionRequestHandler((wc, permission, callback) => callback(allowed(permission)));
+  session.defaultSession.setPermissionCheckHandler((wc, permission) => allowed(permission));
+  session.defaultSession.setDevicePermissionHandler(() => false);
+  removeOldDownloadedGame();
+  createWindow();
 });
-
-ipcMain.handle('nrt:quit', () => app.quit());
-ipcMain.handle('nrt:fullscreen', () => { if (win) win.setFullScreen(!win.isFullScreen()); });
-
-app.whenReady().then(createWindow);
 app.on('window-all-closed', () => app.quit());
+// no other process may open windows or web contents
+app.on('web-contents-created', (e, contents) => {
+  contents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  contents.on('will-navigate', (ev) => ev.preventDefault());
+});

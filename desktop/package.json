@@ -14,22 +14,33 @@
     "build:win": "electron-builder --win --publish never"
   },
   "devDependencies": {
-    "electron": "^33.2.0",
-    "electron-builder": "^25.1.8"
+    "electron": "^45.3.3",
+    "electron-builder": "^26.15.6"
   },
   "build": {
     "appId": "io.github.lordkev007.nightraintaxi",
     "productName": "Night Rain Taxi",
-    "files": ["main.js", "preload.js", "game/**", "build/icon.png"],
-    "directories": { "output": "dist" },
+    "files": [
+      "main.js",
+      "preload.js",
+      "game/**",
+      "build/icon.png"
+    ],
+    "directories": {
+      "output": "dist"
+    },
     "linux": {
-      "target": ["AppImage"],
+      "target": [
+        "AppImage"
+      ],
       "category": "Game",
       "icon": "build/icon.png",
       "artifactName": "NightRainTaxi-${version}.AppImage"
     },
     "win": {
-      "target": ["nsis"],
+      "target": [
+        "nsis"
+      ],
       "icon": "build/icon.png",
       "artifactName": "NightRainTaxi-Setup-${version}.${ext}"
     },
@@ -40,5 +51,8 @@
       "createStartMenuShortcut": true,
       "shortcutName": "Night Rain Taxi"
     }
+  },
+  "engines": {
+    "node": ">=22"
   }
 }
