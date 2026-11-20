@@ -285,7 +285,7 @@ window.NRT_FONTS=Promise.all([["NRT UI","woff","1 549","d09GRgABAAAAADPQABEAAAAA
 <script>
 "use strict";
 // The version shown in Options. The desktop app reads it from this line to decide whether an update is newer.
-const GAME_VERSION='10.27';
+const GAME_VERSION='10.28';
 // Present only inside the Windows / Steam Deck app (see desktop/preload.js): update, quit, fullscreen.
 const DESK=window.nrtDesktop||null;
 (function(){
@@ -1995,7 +1995,7 @@ function gangTarget(c){
   if(c.kind===2){const k=chasers[0],ax=car.x+fx*1.6*C,az=car.z+fz*1.6*C,bx=k.alive?k.x:car.x-fx*200,bz=k.alive?k.z:car.z-fz*200;return [2*ax-bx,2*az-bz];}
   return c.flee?home:[car.x,car.z];
 }
-function wreck(c){recEv('wreck',100,c.g.name+' wrecked',c.x,c.y,c.z);c.alive=false;c.wait=8;bursts.push({x:c.x,y:c.y,z:c.z,t:0});game.total+=500;game.wrecks++;
+function wreck(c){recEv('wreck',100,c.g.name+' wrecked',c.x,c.y,c.z,chasers.indexOf(c));c.alive=false;c.wait=8;bursts.push({x:c.x,y:c.y,z:c.z,t:0});game.total+=500;game.wrecks++;
   $('totalYen').textContent=yen(game.total);sfxThud(30);sfxChime([84,91]);toast(c.g.name+' wrecked +¥500',2);}
 function sfxAlert(){ if(!A.ctx)return; const c=A.ctx;for(let i=0;i<2;i++){const t=c.currentTime+i*.13,o=c.createOscillator(),g=c.createGain();o.type='triangle';o.frequency.setValueAtTime(620,t);o.frequency.exponentialRampToValueAtTime(410,t+.1);
   g.gain.setValueAtTime(.0001,t);g.gain.exponentialRampToValueAtTime(.12,t+.01);g.gain.exponentialRampToValueAtTime(.0005,t+.12);o.connect(g).connect(A.sfx);o.start(t);o.stop(t+.14);} }
@@ -2087,7 +2087,7 @@ function updateChase(dt){
       if(c.ramCool<=0){c.ramCool=1.8;c.vx*=.4;c.vy*=.4;c.vz*=.4;game.hull-=c.g.ram*dmgMul();onHit(c.g.ram*2.7,'ram');spawnSparks(car.x-nx*2.4,car.y-ny*2.4,car.z-nz*2.4,nx,ny,nz,14);
         if(c.kind===3){c.flee=true;c.direct=false;nearestNode(c);}
         if(game.hull<=0){game.hull=0;endShift('Cab wrecked');return;}
-        recEv('ram',10,c.g.name+' rammed you');toast(c.g.name+' rammed you. Cab at '+Math.round(game.hull)+'%',1.6);}}
+        recEv('ram',10,c.g.name+' rammed you',undefined,undefined,undefined,chasers.indexOf(c));toast(c.g.name+' rammed you. Cab at '+Math.round(game.hull)+'%',1.6);}}
     near=Math.min(near,dP);
   }
   // the cabs collide with each other: a nudge pushes them apart, a hard hit wrecks both
@@ -2129,7 +2129,7 @@ function fillChasers(){
 // ten seconds are picked and played back with movie cameras. A (or Enter, Esc, a click) skips.
 const RS=36,RMAX=36000,REC={rows:new Float32Array(RS*RMAX),n:0,last:-1,ev:[]};
 function recReset(){REC.n=0;REC.last=-1;REC.ev.length=0;REC.inTun=false;}
-function recEv(type,score,txt,x,y,z){if(mode!=='getaway'||state!=='play')return;REC.ev.push({t:time,type,score,txt,x:x??car.x,y:y??car.y,z:z??car.z});}
+function recEv(type,score,txt,x,y,z,who){if(mode!=='getaway'||state!=='play')return;REC.ev.push({t:time,type,score,txt,x:x??car.x,y:y??car.y,z:z??car.z,who:who??-1});}
 function recTick(){
   if(mode!=='getaway'||state!=='play'||time-REC.last<1/30)return;REC.last=time;
   if(REC.n>=RMAX){REC.rows.copyWithin(0,(RMAX/2)*RS);REC.n=RMAX/2;}
@@ -2165,6 +2165,7 @@ function pickMoment(){
     for(const e of REC.ev)if(e.t>=t0+1.2&&e.t<=t0+W-1.2){sc+=e.score;if(!top||e.score>top.score)top=e;}
     if(!best||sc>best.sc)best={t0,t1:Math.min(T1,t0+W),sc,top};
   }
+  if(best&&best.top){const t0=clamp(best.top.t-6.5,T0,Math.max(T0,T1-W));best.t0=t0;best.t1=Math.min(T1,t0+W);}
   return best;
 }
 function captionFor(m){
@@ -2177,21 +2178,27 @@ function captionFor(m){
 let RP=null;
 const clearView=(ax,ay,az,bx,by,bz)=>{for(let s=1;s<8;s++){const t=s/8;if(insideSolid(lerp(ax,bx,t),lerp(ay,by,t),lerp(az,bz,t),.8))return false;}return !insideSolid(bx,by,bz,1.2);};
 function planShots(m){
-  const shots=[],tp=m.top?m.top.t:(m.t0+m.t1)/2,order=['chase','side','gang','front','chase','side'];let t=m.t0,k=0;
-  while(t<m.t1-.05){let len=2.6+Math.random()*1.2;
-    let type=order[k%order.length];
-    if(tp>=t&&tp<t+len)type=m.top&&m.top.type==='wreck'?'gang':'street';   // the big moment gets the best seat
-    const sh={type,t,len:Math.min(len,m.t1-t),side:Math.random()<.5?-1:1};
-    if(type==='street'){   // a camera planted beside the path, which the cab screams past
-      const P=recAt(Math.min(m.t1,tp+.5)),rx=Math.cos(P.yaw),rz=-Math.sin(P.yaw);let ok=false;
-      for(const sd of [sh.side,-sh.side])for(const dist of [11,7]){const x=P.x+rx*sd*dist,y=P.y+1.5,z=P.z+rz*sd*dist;
-        if(!ok&&clearView(P.x,P.y+1,P.z,x,y,z)){sh.p=[x,y,z];ok=true;}}
-      if(!ok)sh.type='chase';}
+  // Ordinary shots fill the clip; the big moment gets its own shot from 2.4 s before it to 1.6 s after.
+  const shots=[],top=m.top,order=['chase','side','gang','front','chase','side'];let k=0;
+  const hs=top?Math.max(m.t0,top.t-2.4):1e9,he=top?Math.min(m.t1,top.t+1.6):1e9;
+  const fill=(a,b)=>{let t=a;while(t<b-.05){let len=2.6+Math.random()*1.2;if(b-(t+len)<1.2)len=b-t;
+    const sh={type:order[k%order.length],t,len:Math.min(len,b-t),side:Math.random()<.5?-1:1};
     if(sh.type==='gang'){const P=recAt(t);let bi=-1,bd=140;P.ch.forEach((c,i)=>{if(!c.alive)return;const d=Math.hypot(c.x-P.x,c.z-P.z);if(d<bd){bd=d;bi=i;}});
-      if(bi<0)sh.type=type==='gang'&&tp>=t&&tp<t+len?'street':'side';else sh.who=bi;
-      if(sh.type==='street'){const P2=recAt(Math.min(m.t1,tp+.5)),rx=Math.cos(P2.yaw),rz=-Math.sin(P2.yaw),x=P2.x+rx*sh.side*11,y=P2.y+1.5,z=P2.z+rz*sh.side*11;
-        if(clearView(P2.x,P2.y+1,P2.z,x,y,z))sh.p=[x,y,z];else sh.type='chase';}}
-    shots.push(sh);t+=sh.len;k++;}
+      if(bi<0)sh.type='side';else sh.who=bi;}
+    shots.push(sh);t+=sh.len;k++;}};
+  if(!top){fill(m.t0,m.t1);return shots;}
+  fill(m.t0,hs);
+  const H={t:hs,len:he-hs,side:Math.random()<.5?-1:1,ev:top};
+  const who=top.who??-1,P0=recAt(hs);
+  if(top.type==='wreck'&&who>=0&&P0.ch[who]&&P0.ch[who].alive){H.type='wreck';H.who=who;}
+  else if(top.type==='ram'&&who>=0&&P0.ch[who]&&P0.ch[who].alive){H.type='gang';H.who=who;}
+  else{   // a camera planted beside the path, which the cab screams past
+    const P=recAt(Math.min(m.t1,top.t+.3)),rx=Math.cos(P.yaw),rz=-Math.sin(P.yaw);
+    for(const sd of [H.side,-H.side])for(const dist of [11,7]){const x=P.x+rx*sd*dist,y=P.y+1.5,z=P.z+rz*sd*dist;
+      if(!H.p&&clearView(P.x,P.y+1,P.z,x,y,z))H.p=[x,y,z];}
+    H.type=H.p?'street':'side';}
+  shots.push(H);k++;
+  fill(he,m.t1);
   return shots;
 }
 function startReplay(){
@@ -2216,7 +2223,7 @@ function replayTick(rawDt){
   RP.rt+=Math.min(rawDt,.1);const t=Math.min(RP.m.t1,RP.m.t0+RP.rt);
   replayPose(t);
   for(const e of REC.ev)if(e.t>RP.lastT&&e.t<=t){   // replay the events as they happen
-    if(e.type==='wreck'||(e.type==='end'&&/wrecked/.test(e.txt))){bursts.push({x:e.x,y:e.y,z:e.z,t:0});spawnSparks(e.x,e.y,e.z,0,1,0,30);sfxThud(34);}
+    if(e.type==='wreck'||(e.type==='end'&&/wrecked/.test(e.txt))){bursts.push({x:e.x,y:e.y,z:e.z,t:0});spawnSparks(e.x,e.y,e.z,0,1,0,60);spawnSparks(e.x,e.y+1,e.z,0,1,0,40);sfxThud(34);}
     else if(e.type==='ram'){spawnSparks(e.x,e.y,e.z,0,1,0,12);sfxThud(18);}
     else if(e.type==='near')sfxWhoosh(0,.9);
     else if(e.type==='fare')sfxChime([76,81]);}
@@ -2237,7 +2244,17 @@ function replayCamera(){   // returns [ex,ey,ez,tx,ty,tz,fov]
   let e,look=[car.x+fx*3,car.y+.8,car.z+fz*3],fov=1.08;
   const pull=(w)=>{let tb=1;for(let s=1;s<=8;s++){const k=s/8;if(insideSolid(lerp(car.x,w[0],k),lerp(car.y+1.2,w[1],k),lerp(car.z,w[2],k),1.2)){tb=Math.max(.15,(s-1)/8);break;}}
     return [lerp(car.x,w[0],tb),lerp(car.y+1.2,w[1],tb),lerp(car.z,w[2],tb)];};
-  if(sh.type==='street'&&sh.p){e=sh.p;look=[car.x,car.y+.6,car.z];fov=.82;}
+  const pullTo=(c,w)=>{let tb=1;for(let s=1;s<=8;s++){const k=s/8;if(insideSolid(lerp(c[0],w[0],k),lerp(c[1],w[1],k),lerp(c[2],w[2],k),1.2)){tb=Math.max(.12,(s-1)/8);break;}}
+    return [lerp(c[0],w[0],tb),lerp(c[1],w[1],tb),lerp(c[2],w[2],tb)];};
+  if(sh.type==='wreck'){const ev=sh.ev,c=chasers[sh.who];
+    if(t<ev.t&&c&&c.alive){   // ride along just behind and above the Kuro cab that is about to crash
+      const cf=[Math.sin(c.yaw),Math.cos(c.yaw)],cr=[Math.cos(c.yaw),-Math.sin(c.yaw)],d=11-u*3;
+      e=pullTo([c.x,c.y+1,c.z],[c.x-cf[0]*d+cr[0]*sh.side*4,c.y+3.2,c.z-cf[1]*d+cr[1]*sh.side*4]);
+      look=[c.x+cf[0]*4,c.y+.4,c.z+cf[1]*4];sh.last=e;fov=1.0;}
+    else{   // hold the camera where it was and watch the fireball
+      if(!sh.last){const a=sh.side*1.2;sh.last=pullTo([ev.x,ev.y+1,ev.z],[ev.x+Math.cos(a)*12,ev.y+4,ev.z+Math.sin(a)*12]);}
+      e=sh.last;look=[ev.x,ev.y,ev.z];fov=.9;}}
+  else if(sh.type==='street'&&sh.p){e=sh.p;look=[car.x,car.y+.6,car.z];fov=.82;}
   else if(sh.type==='side'){e=pull([car.x+rx*sh.side*12-fx*(4-u*6),car.y+1.2,car.z+rz*sh.side*12-fz*(4-u*6)]);fov=.95;}
   else if(sh.type==='front'){e=pull([car.x+fx*17+rx*sh.side*3,car.y+2.2,car.z+fz*17+rz*sh.side*3]);look=[car.x,car.y+.6,car.z];fov=.95;}
   else if(sh.type==='gang'&&chasers[sh.who]&&chasers[sh.who].alive){const c=chasers[sh.who],cf=[Math.sin(c.yaw),Math.cos(c.yaw)];
@@ -2550,7 +2567,7 @@ setLamp('空車','Vacant','');
 openRoot('main');
 loadScores();
 setTimeout(()=>$('fade').classList.add('out'),350);
-window.__nrt={tr,setLI:i=>{LI=i;},REC,get RP(){return RP;},pickMoment,garages,HS,car,game,cam,pads,traffic,tunnels,env,SET,sparks,flow,get scatter(){return scatterT;},menuKey:c=>menuKey({code:c,repeat:false,preventDefault(){}}),get menu(){return menuStack.slice();},get sel(){return sel;},togglePause,get time(){return time;},snap(){cam.x=car.x-Math.sin(car.yaw)*12.5;cam.y=car.y+4.2;cam.z=car.z-Math.cos(car.yaw)*12.5;},startGame,endShift,step(n){for(let i=0;i<n;i++){readInput();time+=1/60;if(state==='play'){updateCar(1/60);updateJob(1/60);if(state==='play'&&mode==='getaway')updateChase(1/60);recTick();}updateEnv(1/60);updateFx(1/60);}},chasers,vents:steamI.filter((v,i)=>i%48<3),get state(){return state;},stats:{instCount,signCount,ptCount,rCount,pads:pads.length,traffic:traffic.length}};
+window.__nrt={tr,wreck,chasers,get st(){return state;},setLI:i=>{LI=i;},REC,get RP(){return RP;},pickMoment,garages,HS,car,game,cam,pads,traffic,tunnels,env,SET,sparks,flow,get scatter(){return scatterT;},menuKey:c=>menuKey({code:c,repeat:false,preventDefault(){}}),get menu(){return menuStack.slice();},get sel(){return sel;},togglePause,get time(){return time;},snap(){cam.x=car.x-Math.sin(car.yaw)*12.5;cam.y=car.y+4.2;cam.z=car.z-Math.cos(car.yaw)*12.5;},startGame,endShift,step(n){for(let i=0;i<n;i++){readInput();time+=1/60;if(state==='play'){updateCar(1/60);updateJob(1/60);if(state==='play'&&mode==='getaway')updateChase(1/60);recTick();}updateEnv(1/60);updateFx(1/60);}},chasers,vents:steamI.filter((v,i)=>i%48<3),get state(){return state;},stats:{instCount,signCount,ptCount,rCount,pads:pads.length,traffic:traffic.length}};
 requestAnimationFrame(frame);
 })();
 </script>
