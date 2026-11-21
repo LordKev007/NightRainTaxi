@@ -1,6 +1,16 @@
-# Builds the Steam Deck (Linux AppImage) and Windows versions of Night Rain Taxi.
-# It runs whenever a release is published on GitHub, and attaches the two files to that release.
+# Builds the desktop versions of Night Rain Taxi and attaches them to a GitHub release:
+#   Windows       NightRainTaxi-Setup-<version>.exe
+#   Steam Deck    NightRainTaxi-<version>-SteamDeck-Linux-x64.AppImage  (also runs on most Linux desktops)
+#   Linux         NightRainTaxi-<version>-Linux-x64.tar.gz              (a plain folder; the form Steam wants for upload)
+#   macOS         NightRainTaxi-<version>-mac-arm64.dmg (Apple Silicon) and -mac-x64.dmg (Intel)
+#                 Ad-hoc signed only: players right-click > Open the first time. A paid Apple Developer ID removes that.
+# It runs whenever a release is published on GitHub.
 # It can also be run by hand from the Actions tab; the files then appear under that run's "Artifacts".
+#
+# Security notes:
+#  - every action is pinned to an exact commit, so a changed tag can't change what runs
+#  - the build jobs can only read the repository; only the final release job may write, and it runs no npm code
+#  - npm ci installs exactly what package-lock.json lists
 name: Build desktop versions
 
 on:
@@ -8,26 +18,36 @@ on:
     types: [published]
   workflow_dispatch:
 
-permissions:
-  contents: write
+permissions: {}
 
 jobs:
   build:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
     defaults:
       run:
         shell: bash
         working-directory: desktop
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          node-version: 20
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Check for the lockfile
+        run: |
+          if [ ! -f package-lock.json ]; then
+            echo "::error::desktop/package-lock.json is missing. Run 'npm install --package-lock-only' in the desktop folder and commit the file."
+            exit 1
+          fi
 
       - name: Put the current game inside the app
         run: |
@@ -39,13 +59,14 @@ jobs:
           V=$(grep -o "const GAME_VERSION='[0-9.]*'" game/index.html | grep -o "[0-9][0-9.]*")
           if [[ "$V" =~ ^[0-9]+\.[0-9]+$ ]]; then V="$V.0"; fi
           if [[ "$V" =~ ^[0-9]+$ ]]; then V="$V.0.0"; fi
+          if [[ ! "$V" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo "::error::No game version found"; exit 1; fi
           echo "Game version $V"
           npm pkg set version="$V"
 
       - name: Install the build tools
-        run: npm install
+        run: npm ci
 
-      - name: Build for Steam Deck
+      - name: Build for Steam Deck and Linux
         if: runner.os == 'Linux'
         run: npx electron-builder --linux --publish never
 
@@ -53,18 +74,42 @@ jobs:
         if: runner.os == 'Windows'
         run: npx electron-builder --win --publish never
 
-      - name: Attach the files to the release
-        if: github.event_name == 'release'
+      - name: Build for macOS
+        if: runner.os == 'macOS'
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          shopt -s nullglob
-          files=(dist/*.AppImage dist/*.exe)
-          gh release upload "${{ github.event.release.tag_name }}" "${files[@]}" --clobber --repo "${{ github.repository }}"
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: npx electron-builder --mac --publish never
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: NightRainTaxi-${{ runner.os }}
           path: |
             desktop/dist/*.AppImage
+            desktop/dist/*.tar.gz
             desktop/dist/*.exe
+            desktop/dist/*.dmg
+          if-no-files-found: error
+
+  release:
+    if: github.event_name == 'release'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: NightRainTaxi-*
+          merge-multiple: true
+          path: dist
+
+      - name: Attach the files to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          shopt -s nullglob
+          files=(dist/*.AppImage dist/*.tar.gz dist/*.exe dist/*.dmg)
+          if [ ${#files[@]} -eq 0 ]; then echo "::error::No built files found"; exit 1; fi
+          gh release upload --clobber --repo "$REPO" -- "$TAG" "${files[@]}"
